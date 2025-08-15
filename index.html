@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Match and Mint</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1 class="title"><span class="emoji">🧩</span>Match and Mint</h1>
+
+    <div class="how-to-play">
+      <h2><span class="emoji">📝</span>How to Play</h2>
+      <ol>
+        <li>Choose a wallet: Injected (MetaMask/Backpack/etc.) or WalletConnect.</li>
+        <li>Click “Injected Wallet” or “WalletConnect.”</li>
+        <li>Then click “Start Game.”</li>
+        <li>Rearrange pieces before the timer hits 0.</li>
+        <li>Hit “Mint NFT” anytime until time’s up.</li>
+        <li>If you don’t finish, your arrangement is your masterpiece—feel free to mint or Restart.</li>
+      </ol>
+    </div>
+
+    <div class="controls">
+      <button id="connectInjectedBtn">🔌 Injected Wallet</button>
+      <button id="connectWalletConnectBtn">🔗 WalletConnect</button>
+      <span id="walletStatus"></span>
+    </div>
+    <div class="controls">
+      <button id="startBtn" disabled>🎮 Start Game</button>
+      <button id="mintBtn" disabled>💎 Mint NFT</button>
+      <button id="restartBtn" disabled>🔄 Restart</button>
+    </div>
+    <div id="mintStatus" style="margin-top:.5rem;font-size:.9rem;color:#4c51bf;"></div>
+
+    <div class="timer">⏲️ Time Left: <span id="timeLeft">45</span>s</div>
+
+    <!-- NEW: put preview on the LEFT of the puzzle -->
+    <div class="game-row">
+      <div class="preview">
+        <h3>Reference Picture</h3>
+        <img id="previewImg" src="preview.png" alt="Puzzle Reference" />
+      </div>
+
+      <div id="puzzleGrid" class="grid"></div>
+    </div>
+  </div>
+
+  <!-- UMD libraries -->
+  <script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+
+  <!-- Your application logic -->
+  <script src="script.js" defer></script>
+
+  <!-- Safety net: ensure the Connect button always works -->
+  <script>
+    (function() {
+      function wireNow() {
+        var btn = document.getElementById('connectInjectedBtn');
+        if (!btn) return;
+
+        btn.disabled = false;
+
+        // remove any stale handlers
+        var clone = btn.cloneNode(true);
+        btn.parentNode.replaceChild(clone, btn);
+
+        clone.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (typeof window.connectInjected === 'function') {
+            window.connectInjected();
+          } else {
+            console.warn('[connect] connectInjected not ready yet');
+          }
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', wireNow);
+
+      var tries = 0;
+      var t = setInterval(function() {
+        tries++;
+        if (typeof window.connectInjected === 'function') {
+          wireNow();
+          clearInterval(t);
+        }
+        if (tries > 60) clearInterval(t); // 60 * 250ms ~ 15s max
+      }, 250);
+    })();
+  </script>
+</body>
+</html>
