@@ -381,24 +381,24 @@ async function mintSnapshot() {
     mintBtn.disabled = true;
     setMintStatus('⚙️ Warming up backend…');
 
-    // 0) Pre-warm Netlify to reduce cold start
+    // 0) Pre-warm Netlify to reduce cold start (non-blocking best-effort)
     try { await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`, { method: 'HEAD', cache: 'no-store' }, 4000); } catch {}
 
     // 1) Ensure original image cached (avoid CORS hiccups before canvas)
-    const firstSlot = puzzleGrid.firstElementChild;
+    const firstSlot  = puzzleGrid.firstElementChild;
     const firstPiece = firstSlot?.firstElementChild;
-    const bg = firstPiece?.style?.backgroundImage;
-    const match = bg && bg.match(/url\("(.*)"\)/);
-    const imgUrl = match && match[1];
+    const bg         = firstPiece?.style?.backgroundImage;
+    const match      = bg && bg.match(/url\("(.*)"\)/);
+    const imgUrl     = match && match[1];
     if (imgUrl) {
       setMintStatus('🖼️ Preloading image…');
       await preloadImage(imgUrl);
     }
 
-    // 2) Capture snapshot (PNG — keep format to preserve metadata expectations)
+    // 2) Capture snapshot (PNG)
     setMintStatus('🧩 Capturing snapshot…');
     const canvas = await html2canvas(puzzleGrid, {
-      width: puzzleGrid.clientWidth,
+      width:  puzzleGrid.clientWidth,
       height: puzzleGrid.clientHeight,
       backgroundColor: '#ffffff',
       useCORS: true,
@@ -407,7 +407,57 @@ async function mintSnapshot() {
       scale: 1,
       logging: false
     });
-    const snapshot = canvas.toDataURL('image/png'); // keep PNG
+    const snapshot = canvas.toDataURL('image/png');
+
+    // 3) Upload to Netlify/Pinata
+    setMintStatus('☁️ Uploading to IPFS…');
+    const res = await fetchWithTimeout(`${API_BASE}/api/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: snapshot })
+    }, 25000);
+
+    if (!res.ok) {
+      let msg = 'Upload failed';
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const upload     = await res.json();
+    const metaUri    = upload.uri;            // ipfs://<metadataCID>
+    const imgGateway = upload.imageGateway;   // https://.../<imageCID>
+
+    // 🔑 Use an HTTPS gateway for tokenURI so explorers can read it
+    const metaGateway = metaUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+    console.log('[mint] metadata gateway:', metaGateway);
+
+    // 4) Warm gateways (non-blocking)
+    (async () => { try { await warm(metaGateway, 2); } catch {} })();
+    (async () => { try { if (imgGateway) await warm(imgGateway, 1); } catch {} })();
+
+    // 5) Mint on-chain using HTTPS metadata URL
+    setMintStatus('⛓️ Sending transaction…');
+    const to = await signer.getAddress();
+    const tx = await contract.mintNFT(to, metaGateway);
+
+    setMintStatus('⏱️ Waiting 1 confirmation…');
+    await provider.waitForTransaction(tx.hash, 1);
+
+    // 6) Done
+    previewImg.src = snapshot;
+    setMintStatus('🎉 Minted!');
+    clearInterval(timerHandle);
+    startBtn.disabled = false;
+    restartBtn.disabled = false;
+    alert('🎉 Minted successfully!');
+  } catch (err) {
+    console.error(err);
+    alert('Mint failed: ' + (err?.message || err));
+  } finally {
+    mintBtn.disabled = false;
+  }
+}
+
 
     // 3) Upload to Netlify/Pinata (same JSON body)
     setMintStatus('☁️ Uploading to IPFS…');
