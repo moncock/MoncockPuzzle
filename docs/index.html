@@ -13,12 +13,9 @@
     <div class="how-to-play">
       <h2><span class="emoji">📝</span>How to Play</h2>
       <ol>
-        <li>Choose a wallet: Injected (MetaMask/Backpack/etc.) or WalletConnect.</li>
-        <li>Click “Injected Wallet” or “WalletConnect.”</li>
-        <li>Then click “Start Game.”</li>
-        <li>Rearrange pieces before the timer hits 0.</li>
-        <li>Hit “Mint NFT” anytime until time’s up.</li>
-        <li>If you don’t finish, your arrangement is your masterpiece—feel free to mint or Restart.</li>
+        <li>Choose a wallet: Injected (MetaMask/Rabby/Backpack/etc.).</li>
+        <li>Click “Injected Wallet”, then “Start Game”.</li>
+        <li>Rearrange pieces before the timer hits 0; mint anytime.</li>
       </ol>
     </div>
 
@@ -49,8 +46,15 @@
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-  <!-- Your application logic (runs after parse) -->
-  <script src="script.js" defer></script>
+  <!-- Show any JS errors immediately (helps catch typos) -->
+  <script>
+    window.addEventListener('error', function (e) {
+      alert('JS error: ' + e.message);
+    });
+  </script>
+
+  <!-- Your application logic (cache-busted) -->
+  <script src="script.js?v=3" defer></script>
 
   <!-- Safety net: ensure the Connect button always works -->
   <script>
