@@ -47,6 +47,11 @@ const ASSETS_REPO   = 'MoncockPuzzle';
 const GITHUB_BRANCH = 'main';
 const IMAGES_PATH   = 'docs/asset/images';
 
+// ── API base (for Netlify function) ───────────────────
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8888'     // netlify dev
+  : '';                          // same-origin in production
+
 // ── UI ELEMENTS ───────────────────────────────────────
 const connectInjectedBtn      = document.getElementById('connectInjectedBtn');
 const connectWalletConnectBtn = document.getElementById('connectWalletConnectBtn');
@@ -161,11 +166,20 @@ function connectWalletConnect() { alert('WalletConnect coming soon 🤝'); }
 // ── ASSET HELPERS ─────────────────────────────────────
 function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
 function pickRandomImage() { if (!imageList.length) return 'preview.png'; const file = imageList[Math.floor(Math.random() * imageList.length)]; return `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/${IMAGES_PATH}/${file}`; }
+
 async function loadImageList() {
-  const url = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/list.json`;
-  try { const res = await fetch(url); if (!res.ok) throw new Error(res.status); imageList = await res.json(); }
-  catch { alert('⚠️ Could not load asset list.'); }
+  const base = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/docs/asset/list.json`;
+  const url  = `${base}?t=${Date.now()}`; // cache-buster to avoid stale CDN
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    imageList = await res.json();
+  } catch (e) {
+    console.error('list.json fetch failed:', e);
+    alert('⚠️ Could not load asset list.');
+  }
 }
+
 async function preloadImage(url) {
   await new Promise((resolve, reject) => {
     const img = new Image(); img.crossOrigin = 'anonymous';
@@ -342,7 +356,6 @@ async function warm(url, tries = 3) {
   return false;
 }
 
-
 // === Mint UX helpers (status + timeout) ===
 function setMintStatus(msg) {
   const el = document.getElementById('mintStatus');
@@ -359,8 +372,8 @@ async function fetchWithTimeout(url, opts = {}, ms = 20000) {
     clearTimeout(t);
   }
 }
-// ── MINT SNAPSHOT via SERVER API ──────────────────────
 
+// ── MINT SNAPSHOT via SERVER API ──────────────────────
 async function mintSnapshot() {
   try {
     if (!puzzleGrid.children.length) throw new Error('No puzzle to mint');
@@ -440,7 +453,6 @@ async function mintSnapshot() {
     mintBtn.disabled = false;
   }
 }
-
 
 // ── WIRE UP BUTTONS ───────────────────────────────────
 if (mintBtn) mintBtn.addEventListener('click', mintSnapshot);
