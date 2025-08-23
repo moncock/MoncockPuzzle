@@ -42,10 +42,10 @@ const ABI = [
 ];
 
 // ── ASSETS CONFIG ─────────────────────────────────────
-const GITHUB_OWNER  = 'Chiyachita';
-const ASSETS_REPO   = 'match-and-mint-assets';
+const GITHUB_OWNER  = 'moncock';
+const ASSETS_REPO   = 'MoncockPuzzle';
 const GITHUB_BRANCH = 'main';
-const IMAGES_PATH   = 'images';
+const IMAGES_PATH   = 'docs/asset/images';
 
 // ── UI ELEMENTS ───────────────────────────────────────
 const connectInjectedBtn      = document.getElementById('connectInjectedBtn');
