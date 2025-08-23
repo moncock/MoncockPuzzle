@@ -62,15 +62,16 @@ exports.handler = async (event) => {
     const imageGateway = `https://gateway.pinata.cloud/ipfs/${imageCid}`;
 
     // 2) Upload metadata JSON
-    const metadata = {
-      name: 'Match and Mint Puzzle NFT',
-      description: 'A unique puzzle arrangement created in the Match and Mint game',
-      image: imageGateway,
-      attributes: [
-        { trait_type: 'Game', value: 'Match and Mint' },
-        { trait_type: 'Creation Date', value: new Date().toISOString() }
-      ]
-    };
+const metadata = {
+  name: 'MONCOCK PUZZLE',
+  description: 'A unique puzzle arrangement created in the MONCOCK PUZZLE game',
+  image: imageGateway,   // keep this as the HTTPS gateway so explorers can render it
+  attributes: [
+    { trait_type: 'Game', value: 'MONCOCK' },
+    { trait_type: 'Creation Date', value: new Date().toISOString() }
+  ]
+};
+
 
     const metaRes = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
       method: 'POST',
