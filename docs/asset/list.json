@@ -1,1 +1,2 @@
-["puzzle1.svg","puzzle2.svg","puzzle3.svg","puzzle4.svg","puzzle5.svg","puzzle6.svg","puzzle7.svg","puzzle8.svg"]
+const IMAGES_PATH = 'docs/asset/images';
+const url = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/docs/asset/list.json`;
