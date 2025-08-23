@@ -46,10 +46,13 @@
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-  <!-- Show any JS errors immediately (helps catch typos) -->
+  <!-- Filtered error logger: only logs errors from our own script.js -->
   <script>
     window.addEventListener('error', function (e) {
-      alert('JS error: ' + e.message);
+      // Only handle errors that originate from our app file (script.js)
+      if (!e.filename || !/\/script\.js(\?.*)?$/.test(e.filename)) return;
+      // Show a non-blocking console message instead of an alert
+      console.error('App JS error:', e.message, 'at', e.filename + ':' + e.lineno + ':' + e.colno);
     });
   </script>
 
@@ -70,7 +73,8 @@
           if (typeof window.connectInjected === 'function') {
             window.connectInjected();
           } else {
-            alert('App not ready yet—please try again in a second.');
+            // gentle message if app not ready yet
+            console.warn('App not ready yet—trying again soon.');
           }
         });
       }
@@ -79,7 +83,7 @@
       var t = setInterval(function() {
         tries++;
         if (typeof window.connectInjected === 'function') { wireNow(); clearInterval(t); }
-        if (tries > 60) clearInterval(t);
+        if (tries > 60) clearInterval(t); // ~15s
       }, 250);
     })();
   </script>
