@@ -1,0 +1,33 @@
+name: Build list.json
+
+on:
+  push:
+    paths:
+      - "docs/asset/images/**"          # run when images change
+      - ".github/workflows/build-list-json.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-list:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate docs/asset/list.json
+        run: |
+          node -e "const fs=require('fs');const p='docs/asset/images';const out='docs/asset/list.json';const files=fs.readdirSync(p).filter(f=>/\.(png|jpg|jpeg|gif|svg)$/i.test(f)).sort();fs.writeFileSync(out, JSON.stringify(files,null,2)+'\n');console.log('Wrote',out,'with',files.length,'items');"
+      - name: Commit & push if changed
+        run: |
+          if [[ -n $(git status --porcelain docs/asset/list.json) ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add docs/asset/list.json
+            git commit -m "chore: auto-update docs/asset/list.json"
+            git push
+          else
+            echo "No changes to commit."
+          fi
