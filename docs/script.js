@@ -1,4 +1,4 @@
-// ✅ MONCOCK PUZZLE — script.js (full, drop-in)
+// ✅ MONCOCK PUZZLE — script.js
 
 // ── CONFIG ────────────────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
@@ -46,11 +46,7 @@ const GITHUB_OWNER  = 'moncock';
 const ASSETS_REPO   = 'MoncockPuzzle';
 const GITHUB_BRANCH = 'main';
 const IMAGES_PATH   = 'docs/asset/images';
-
-// ── API base (for Netlify function) ───────────────────
-const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:8888'
-  : '';
+const API_BASE      = ''; // Netlify functions live at /.netlify/functions
 
 // ── UI ELEMENTS ───────────────────────────────────────
 const connectInjectedBtn      = document.getElementById('connectInjectedBtn');
@@ -71,6 +67,9 @@ let draggedPiece = null;
 let sourceSlot = null;
 const ROWS = 3, COLS = 3;
 
+// ── LOG ───────────────────────────────────────────────
+console.log('[boot] script.js loaded. ethers?', !!window.ethers);
+
 // ── HELPERS: Providers ────────────────────────────────
 function brandName(p) {
   if (!p) return 'Unknown';
@@ -86,7 +85,6 @@ function brandName(p) {
   return 'Injected';
 }
 
-// choose the best injected provider
 function getInjectedProvider() {
   const pool = [];
   const eth = window.ethereum;
@@ -103,7 +101,6 @@ async function switchToMonad(ethersProvider) {
   try {
     const chainIdHex = await ethersProvider.send('eth_chainId', []);
     if (chainIdHex?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
-
     try {
       await ethersProvider.send('wallet_switchEthereumChain', [{ chainId: CHAIN_ID_HEX }]);
     } catch (e) {
@@ -129,14 +126,14 @@ async function finishConnect(ethersProvider) {
   provider = ethersProvider;
   signer   = provider.getSigner();
   contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-
   const addr = await signer.getAddress();
-  if (walletStatus) walletStatus.textContent = `Connected: ${addr.slice(0,6)}...${addr.slice(-4)} (Monad)`;
-  if (startBtn) startBtn.disabled = false;
-  if (mintBtn) mintBtn.disabled = false;
+  walletStatus.textContent = `Connected: ${addr.slice(0,6)}...${addr.slice(-4)} (Monad)`;
+  startBtn.disabled = false;
+  mintBtn.disabled = false;
 }
 
 async function connectInjected() {
+  console.log('[connect] trying injected provider…');
   const injected = getInjectedProvider();
   if (!injected) {
     alert('No injected wallet found. Install/enable MetaMask/Rabby/Backpack or use their in-app browser.');
@@ -159,29 +156,16 @@ window.connectInjected = connectInjected;
 
 function connectWalletConnect() { alert('WalletConnect coming soon 🤝'); }
 
-// ── ASSET HELPERS ─────────────────────────────────────
-function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
-function pickRandomImage() {
-  if (!imageList.length) return 'preview.png';
-  const file = imageList[Math.floor(Math.random() * imageList.length)];
-  return `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/${IMAGES_PATH}/${file}`;
-}
+// (assets helpers, puzzle logic, timer, mintSnapshot, etc.)
+// … [keep your existing puzzle + mintSnapshot code here — unchanged except using metaGateway as I showed earlier] …
 
-async function loadImageList() {
-  const base = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/docs/asset/list.json`;
-  const url  = `${base}?t=${Date.now()}`; // cache-buster
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(res.status);
-    imageList = await res.json();
-  } catch (e) {
-    console.error('list.json fetch failed:', e);
-    alert('⚠️ Could not load asset list.');
-  }
-}
+// ── WIRE UP BUTTONS ───────────────────────────────────
+if (mintBtn) mintBtn.addEventListener('click', mintSnapshot);
+if (connectInjectedBtn) connectInjectedBtn.addEventListener('click', connectInjected);
+if (connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
 
-async function preloadImage(url) {
-  await new Promise((resolve, reject) => {
-    const img = new Image(); img.crossOrigin = 'anonymous';
-    img.onload = resolve; img.onerror = reject;
-    img.src =
+// ── INIT ──────────────────────────────────────────────
+(async function init() {
+  await loadImageList();
+  if (imageList.length) previewImg.src = pickRandomImage();
+})();
