@@ -36,23 +36,20 @@
 
     <div class="timer">⏲️ Time Left: <span id="timeLeft">45</span>s</div>
 
-    <!-- NEW: put preview on the LEFT of the puzzle -->
     <div class="game-row">
       <div class="preview">
         <h3>Reference Picture</h3>
         <img id="previewImg" src="preview.png" alt="Puzzle Reference" />
       </div>
-
       <div id="puzzleGrid" class="grid"></div>
     </div>
   </div>
 
-  <!-- UMD libraries -->
-  <script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+  <!-- Load libs FIRST so globals exist for script.js -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-  <!-- Your application logic -->
+  <!-- Your application logic (runs after parse) -->
   <script src="script.js" defer></script>
 
   <!-- Safety net: ensure the Connect button always works -->
@@ -61,33 +58,24 @@
       function wireNow() {
         var btn = document.getElementById('connectInjectedBtn');
         if (!btn) return;
-
         btn.disabled = false;
-
-        // remove any stale handlers
         var clone = btn.cloneNode(true);
         btn.parentNode.replaceChild(clone, btn);
-
         clone.addEventListener('click', function(e) {
           e.preventDefault();
           if (typeof window.connectInjected === 'function') {
             window.connectInjected();
           } else {
-            console.warn('[connect] connectInjected not ready yet');
+            alert('App not ready yet—please try again in a second.');
           }
         });
       }
-
       document.addEventListener('DOMContentLoaded', wireNow);
-
       var tries = 0;
       var t = setInterval(function() {
         tries++;
-        if (typeof window.connectInjected === 'function') {
-          wireNow();
-          clearInterval(t);
-        }
-        if (tries > 60) clearInterval(t); // 60 * 250ms ~ 15s max
+        if (typeof window.connectInjected === 'function') { wireNow(); clearInterval(t); }
+        if (tries > 60) clearInterval(t);
       }, 250);
     })();
   </script>
