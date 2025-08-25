@@ -1,4 +1,4 @@
-name: Update list.json on image changes
+name: Build docs/list.json on image changes
 
 on:
   push:
@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,61 +23,78 @@ jobs:
         with:
           node-version: "20"
 
+      # Generate docs/list.json from files in docs/asset/images
       - name: Generate docs/list.json
         run: |
           mkdir -p scripts
           cat > scripts/gen-list.mjs <<'EOF'
           import { readdirSync, writeFileSync, statSync } from "fs";
+
           const IMAGES_DIR = "docs/asset/images";
           const LIST_PATH  = "docs/list.json";
           const exts = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 
-          function walkImages(dir) {
-            const out = [];
+          function listImages(dir) {
             const entries = readdirSync(dir, { withFileTypes: true });
+            const files = [];
             for (const e of entries) {
-              if (e.isDirectory()) continue;
+              if (!e.isFile()) continue;
               const name = e.name;
               const lower = name.toLowerCase();
               const dot = lower.lastIndexOf(".");
               const ext = dot >= 0 ? lower.slice(dot) : "";
-              if (exts.has(ext)) out.push(name);
+              if (exts.has(ext)) files.push(name);
             }
-            // natural-ish sort so puzzle2 < puzzle10
-            out.sort((a, b) => (a.length - b.length) || a.localeCompare(b, 'en', { numeric: true }));
-            return out;
+            // Natural-ish sort: keeps puzzle2 before puzzle10
+            files.sort((a, b) => (a.length - b.length) || a.localeCompare(b, "en", { numeric: true }));
+            return files;
           }
 
           function main() {
             try {
               const s = statSync(IMAGES_DIR);
               if (!s.isDirectory()) throw new Error(`${IMAGES_DIR} is not a directory`);
-              const files = walkImages(IMAGES_DIR);
+              const files = listImages(IMAGES_DIR);
               const json = JSON.stringify(files, null, 2) + "\n";
               writeFileSync(LIST_PATH, json);
-              console.log(`Wrote ${LIST_PATH} with ${files.length} entries.`);
+              console.log(`Wrote ${LIST_PATH} with ${files.length} entries`);
             } catch (err) {
               console.error("Failed to build list.json:", err);
               process.exit(1);
             }
           }
+
           main();
           EOF
           node scripts/gen-list.mjs
 
-      - name: Commit changes
+      - name: Commit list.json if changed
         run: |
           if git diff --quiet docs/list.json; then
-            echo "No changes to list.json"
+            echo "No changes to docs/list.json"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/list.json
           git commit -m "chore: auto-update docs/list.json"
           git push
 
-      - name: Purge jsDelivr cache for list.json
+      # Purge jsDelivr cache so the site sees the new list immediately
+      - name: Purge jsDelivr cache (list.json)
         run: |
-          # 👇 Update these if your GitHub owner/repo or branch is different
+          # EDIT if your owner/repo/branch differs
           curl -sS "https://purge.jsdelivr.net/gh/moncock/MoncockPuzzle@main/docs/list.json" || true
+
+      # (Optional) Purge any changed images too
+      - name: Purge jsDelivr cache (changed images)
+        if: always()
+        run: |
+          # Compare with previous commit; ignore if first run
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD^ HEAD -- 'docs/asset/images/**' || true)
+            for f in $CHANGED; do
+              echo "Purging $f"
+              curl -sS "https://purge.jsdelivr.net/gh/moncock/MoncockPuzzle@main/$f" || true
+            done
+          fi
