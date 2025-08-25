@@ -13,7 +13,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,30 +22,22 @@ jobs:
         with:
           node-version: "20"
 
-      # Generate docs/list.json from files in docs/asset/images
       - name: Generate docs/list.json
         run: |
           mkdir -p scripts
           cat > scripts/gen-list.mjs <<'EOF'
           import { readdirSync, writeFileSync, statSync } from "fs";
-
           const IMAGES_DIR = "docs/asset/images";
-          const LIST_PATH  = "docs/list.json";
+          const LIST_PATH  = "docs/list.json";   // <- OUTPUT HERE
           const exts = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 
           function listImages(dir) {
-            const entries = readdirSync(dir, { withFileTypes: true });
-            const files = [];
-            for (const e of entries) {
-              if (!e.isFile()) continue;
-              const name = e.name;
-              const lower = name.toLowerCase();
-              const dot = lower.lastIndexOf(".");
-              const ext = dot >= 0 ? lower.slice(dot) : "";
-              if (exts.has(ext)) files.push(name);
-            }
-            // Natural-ish sort: keeps puzzle2 before puzzle10
-            files.sort((a, b) => (a.length - b.length) || a.localeCompare(b, "en", { numeric: true }));
+            const files = readdirSync(dir, { withFileTypes: true })
+              .filter(e => e.isFile())
+              .map(e => e.name)
+              .filter(name => exts.has(name.toLowerCase().slice(name.lastIndexOf("."))));
+            // natural-ish sort so puzzle2 < puzzle10
+            files.sort((a,b)=>(a.length-b.length) || a.localeCompare(b, "en", { numeric: true }));
             return files;
           }
 
@@ -55,15 +46,13 @@ jobs:
               const s = statSync(IMAGES_DIR);
               if (!s.isDirectory()) throw new Error(`${IMAGES_DIR} is not a directory`);
               const files = listImages(IMAGES_DIR);
-              const json = JSON.stringify(files, null, 2) + "\n";
-              writeFileSync(LIST_PATH, json);
+              writeFileSync(LIST_PATH, JSON.stringify(files, null, 2) + "\n");
               console.log(`Wrote ${LIST_PATH} with ${files.length} entries`);
             } catch (err) {
               console.error("Failed to build list.json:", err);
               process.exit(1);
             }
           }
-
           main();
           EOF
           node scripts/gen-list.mjs
@@ -80,17 +69,13 @@ jobs:
           git commit -m "chore: auto-update docs/list.json"
           git push
 
-      # Purge jsDelivr cache so the site sees the new list immediately
       - name: Purge jsDelivr cache (list.json)
         run: |
-          # EDIT if your owner/repo/branch differs
           curl -sS "https://purge.jsdelivr.net/gh/moncock/MoncockPuzzle@main/docs/list.json" || true
 
-      # (Optional) Purge any changed images too
-      - name: Purge jsDelivr cache (changed images)
+      - name: Purge jsDelivr cache (changed images) # optional
         if: always()
         run: |
-          # Compare with previous commit; ignore if first run
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD^ HEAD -- 'docs/asset/images/**' || true)
             for f in $CHANGED; do
