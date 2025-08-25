@@ -1,4 +1,4 @@
-// ✅ MONCOCK PUZZLE — script.js (full, 30s timer, local assets, restart fix)
+// ✅ MONCOCK PUZZLE — script.js (full, metadata-fixed, 30s timer, local assets)
 
 // ── CONFIG ────────────────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
@@ -359,7 +359,7 @@ async function fetchWithTimeout(url, opts = {}, ms = 20000) {
   }
 }
 
-// ── MINT SNAPSHOT via SERVER API ──────────────────────
+// ── MINT SNAPSHOT via SERVER API (✅ metadata fixed) ──
 async function mintSnapshot() {
   try {
     if (!puzzleGrid.children.length) throw new Error('No puzzle to mint');
@@ -395,41 +395,48 @@ async function mintSnapshot() {
     });
     const snapshot = canvas.toDataURL('image/png');
 
-    // upload to Netlify/Pinata
+    // upload to Netlify/Pinata (server creates image + metadata)
     setMintStatus('☁️ Uploading to IPFS…');
     const res = await fetchWithTimeout(`${API_BASE}/api/upload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: snapshot })
+      body: JSON.stringify({
+        image: snapshot,
+        name: 'Moncock Puzzle',
+        description: 'Snapshot of your puzzle from Moncock Puzzle.',
+        attributes: [
+          { trait_type: 'Game', value: 'Puzzle' },
+          { trait_type: 'Timer', value: '30s' }
+        ]
+      })
     }, 25000);
 
     if (!res.ok) {
-      let msg = 'Upload failed';
-      try { const j = await res.json(); msg = j.error || msg; } catch {}
-      throw new Error(msg);
+      const text = await res.text().catch(()=>'');
+      throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
     }
 
-    const upload     = await res.json();
-    const metaUri    = upload.uri;            // ipfs://<metadataCID>
-    const imgGateway = upload.imageGateway;   // https://gateway.pinata.cloud/ipfs/<imageCID>
+    const upload = await res.json();
 
-// ✅ use uriGateway returned from backend
-const metaGateway = upload.uriGateway;
-if (!metaGateway) throw new Error('Upload response missing uriGateway');
-console.log('[mint] metadata gateway:', metaGateway);
+    // ✅ Use HTTPS metadata JSON returned by backend (critical!)
+    const metaGateway = upload.uriGateway;
+    if (!metaGateway || !/^https?:\/\//.test(metaGateway)) {
+      console.error('Upload response:', upload);
+      throw new Error('Invalid upload response: missing uriGateway');
+    }
+    console.log('[mint] metadata gateway:', metaGateway);
 
-// warm gateways (non-blocking)
-(async () => { try { await warm(metaGateway, 2); } catch {} })();
-(async () => { try { if (upload.imageGateway) await warm(upload.imageGateway, 1); } catch {} })();
+    // warm gateways (non-blocking)
+    (async () => { try { await warm(metaGateway, 2); } catch {} })();
+    (async () => { try { if (upload.imageGateway) await warm(upload.imageGateway, 1); } catch {} })();
 
-// mint on-chain with HTTPS metadata JSON
-setMintStatus('⛓️ Sending transaction…');
-const to = await signer.getAddress();
-const tx = await contract.mintNFT(to, metaGateway);
+    // mint on-chain with METADATA JSON (not the image!)
+    setMintStatus('⛓️ Sending transaction…');
+    const to = await signer.getAddress();
+    const tx = await contract.mintNFT(to, metaGateway);
 
-setMintStatus('⏱️ Waiting 1 confirmation…');
-await provider.waitForTransaction(tx.hash, 1);
-
+    setMintStatus('⏱️ Waiting 1 confirmation…');
+    await provider.waitForTransaction(tx.hash, 1);
 
     // done
     previewImg.src = snapshot;
