@@ -1,51 +1,81 @@
 // netlify/functions/upload.js
-// Node 18+ (fetch, FormData, Blob built-in)
+// Node 18+ runtime: built-in fetch, FormData, Blob, Buffer available
+
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS, HEAD',
+  'access-control-allow-headers': 'content-type, authorization',
+  'content-type': 'application/json'
+};
 
 export async function handler(event) {
   try {
-    // Warmup ping
+    // CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+      return { statusCode: 204, headers: CORS, body: '' };
+    }
+
+    // Warmup ping for cold starts
     if (event.httpMethod === 'HEAD' && event.queryStringParameters?.warm === '1') {
-      return { statusCode: 204 };
+      return { statusCode: 204, headers: CORS, body: '' };
     }
 
     if (event.httpMethod !== 'POST') {
-      return { statusCode: 405, body: 'Method Not Allowed' };
+      return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    const { image, name, description, attributes } = JSON.parse(event.body || '{}');
-    if (!image || !image.startsWith('data:image/')) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Missing or invalid image data' }) };
+    // ---- Parse input ----
+    const body = JSON.parse(event.body || '{}');
+    const { image, name, description, attributes } = body;
+
+    if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+      return {
+        statusCode: 400,
+        headers: CORS,
+        body: JSON.stringify({ error: 'Missing or invalid "image" data URL' })
+      };
     }
 
-    // Decode base64 PNG
+    const jwt = process.env.PINATA_JWT;
+    if (!jwt) {
+      return {
+        statusCode: 500,
+        headers: CORS,
+        body: JSON.stringify({ error: 'Server not configured: PINATA_JWT is missing' })
+      };
+    }
+
+    // ---- Decode base64 image (usually PNG from canvas) ----
     const base64 = image.split(',')[1];
     const bytes = Buffer.from(base64, 'base64');
 
     // ---- 1) Upload image to Pinata ----
     const formImg = new FormData();
+    // Use PNG as default filename; Pinata looks at the content, not extension
     formImg.append('file', new Blob([bytes], { type: 'image/png' }), 'puzzle.png');
 
-    const pinataFile = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    const upImage = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
-      body: formImg,
+      headers: { Authorization: `Bearer ${jwt}` },
+      body: formImg
     });
 
-    if (!pinataFile.ok) {
-      const txt = await pinataFile.text();
-      return { statusCode: pinataFile.status, body: JSON.stringify({ error: txt }) };
+    if (!upImage.ok) {
+      const txt = await safeText(upImage);
+      return { statusCode: upImage.status, headers: CORS, body: JSON.stringify({ error: txt }) };
     }
-    const fileJson = await pinataFile.json();
-    const imageCid = fileJson.IpfsHash;
+
+    const imageResp = await upImage.json();
+    const imageCid = imageResp.IpfsHash;
     const imageUri = `ipfs://${imageCid}`;
     const imageGateway = `https://gateway.pinata.cloud/ipfs/${imageCid}`;
 
-    // ---- 2) Build metadata JSON ----
+    // ---- 2) Build ERC-721 metadata JSON on the server ----
     const metadata = {
       name: name || 'Moncock Puzzle',
-      description: description || 'Snapshot of your puzzle from Moncock Puzzle',
+      description: description || 'Snapshot of your puzzle from Moncock Puzzle.',
       image: imageUri,
-      attributes: Array.isArray(attributes) ? attributes : [],
+      attributes: Array.isArray(attributes) ? attributes : []
     };
 
     // ---- 3) Upload metadata JSON to Pinata ----
@@ -56,30 +86,44 @@ export async function handler(event) {
       'metadata.json'
     );
 
-    const pinataMeta = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    const upMeta = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
-      body: formMeta,
+      headers: { Authorization: `Bearer ${jwt}` },
+      body: formMeta
     });
 
-    if (!pinataMeta.ok) {
-      const txt = await pinataMeta.text();
-      return { statusCode: pinataMeta.status, body: JSON.stringify({ error: txt }) };
+    if (!upMeta.ok) {
+      const txt = await safeText(upMeta);
+      return { statusCode: upMeta.status, headers: CORS, body: JSON.stringify({ error: txt }) };
     }
-    const metaJson = await pinataMeta.json();
-    const metaCid = metaJson.IpfsHash;
+
+    const metaResp = await upMeta.json();
+    const metaCid = metaResp.IpfsHash;
     const metaUri = `ipfs://${metaCid}`;
     const uriGateway = `https://gateway.pinata.cloud/ipfs/${metaCid}`;
 
-    // ---- 4) Return both ----
+    // ---- 4) Return both links to the client ----
     return {
       statusCode: 200,
-      body: JSON.stringify({ imageGateway, uri: metaUri, uriGateway }),
-      headers: { 'content-type': 'application/json' },
+      headers: CORS,
+      body: JSON.stringify({
+        imageGateway, // HTTP link to image (for preview/debug)
+        uri: metaUri, // ipfs:// URL to metadata (some apps may use it)
+        uriGateway    // HTTP link to metadata → MINT WITH THIS
+      })
     };
 
   } catch (err) {
     console.error('[upload] error', err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Internal Error' }) };
+    return {
+      statusCode: 500,
+      headers: CORS,
+      body: JSON.stringify({ error: err?.message || 'Internal Error' })
+    };
   }
+}
+
+// Small helper to safely read error text
+async function safeText(res) {
+  try { return await res.text(); } catch { return res.statusText || 'Upload failed'; }
 }
