@@ -62,8 +62,18 @@
     });
   </script>
 
-  <!-- App logic (cache-busted to pull the latest 30s timer + fixes) -->
-  <script src="script.js?v=12" defer></script>
+  <!-- 👇 Automatic cache-busting for script.js -->
+  <script>
+    (function () {
+      // If you ever set window.__BUILD_ID__ (e.g., in Netlify), it’ll use that;
+      // otherwise it falls back to Date.now() to force a fresh download.
+      var version = (window.__BUILD_ID__ || Date.now());
+      var s = document.createElement('script');
+      s.src = 'script.js?v=' + encodeURIComponent(version);
+      // No defer here; our “safety net” below patiently waits for connectInjected anyway.
+      document.head.appendChild(s);
+    })();
+  </script>
 
   <!-- Safety net: ensure the Connect button always works -->
   <script>
