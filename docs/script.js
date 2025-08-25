@@ -1,8 +1,7 @@
-// ✅ MONCOCK PUZZLE — script.js (grid-only capture; keep reference unchanged)
+// ✅ MONCOCK PUZZLE — script.js (mint via custom canvas render of the GRID only)
 
 // ── SETTINGS ──────────────────────────────────────────
-// Capture only the puzzle board on the right
-const CAPTURE_TARGET = 'grid'; // fixed to grid
+const CAPTURE_TARGET = 'grid'; // fixed to 'grid' (right board only)
 
 // ── CONTRACT CONFIG ───────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
@@ -45,6 +44,8 @@ const ABI = [
 // ── ASSETS (served from your site) ────────────────────
 const API_BASE = '';
 let imageList = [];
+let currentImageUrl = null;         // URL used for THIS round
+let currentImageEl  = null;         // HTMLImageElement loaded for mint
 
 function imageUrl(file) { return `${location.origin}/asset/images/${file}`; }
 
@@ -66,12 +67,14 @@ function pickRandomImage() {
   return imageUrl(file);
 }
 
-async function preloadImage(url) {
+async function loadHTMLImage(url) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
   await new Promise((resolve, reject) => {
-    const img = new Image(); img.crossOrigin = 'anonymous';
     img.onload = resolve; img.onerror = reject;
     img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
   });
+  return img;
 }
 
 // ── UI ELEMENTS ───────────────────────────────────────
@@ -149,14 +152,12 @@ async function finishConnect(ethersProvider) {
   const addr = await signer.getAddress();
   if (walletStatus) walletStatus.textContent = `Connected: ${addr.slice(0,6)}...${addr.slice(-4)} (Monad)`;
   if (startBtn) startBtn.disabled = false;
-  if (mintBtn) mintBtn.disabled = false;
+  if (mintBtn)  mintBtn.disabled  = false;
 }
-// Prefer window.ethereum; fallback to pool
 async function connectInjected() {
   console.log('[connect] trying injected provider…');
   let injected = window.ethereum || null;
   if (!injected) injected = getInjectedProvider();
-
   if (!injected) {
     alert('No injected wallet found. Please install/enable MetaMask/Rabby or open this site in the wallet’s in-app browser.');
     return;
@@ -251,8 +252,14 @@ if(startBtn){
   startBtn.addEventListener('click',async()=>{
     startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
     if(!imageList.length) await loadImageList();
-    const url=pickRandomImage(); await preloadImage(url);
-    previewImg.src=url; buildPuzzle(url); startTimer(); restartBtn.disabled=false;
+    const url = pickRandomImage();
+    const img = await loadHTMLImage(url);       // load for both preview & mint
+    currentImageUrl = url;
+    currentImageEl  = img;
+    previewImg.src  = url;                      // keep reference unchanged
+    buildPuzzle(url);
+    startTimer();
+    restartBtn.disabled=false;
   });
 }
 
@@ -267,31 +274,87 @@ async function fetchWithTimeout(url,opts={},ms=20000){
   try{ return await fetch(url,{...opts,signal:ctrl.signal}); } finally{ clearTimeout(t); }
 }
 
-// ── MINT SNAPSHOT (grid-only; keep reference unchanged) ──
+// ── RENDER THE BOARD TO CANVAS (no html2canvas) ───────
+// This draws exactly what the user arranged on the right board.
+// It respects grid gap; it draws tiles from the ORIGINAL image.
+function renderBoardToCanvas() {
+  if (!currentImageEl) throw new Error('Image not loaded');
+
+  const gridRect = puzzleGrid.getBoundingClientRect();
+  const computed = getComputedStyle(puzzleGrid);
+  const gapPx    = parseFloat(computed.gap || computed.gridGap || '0') || 0;
+
+  // Tile rects come from the first slot
+  const firstSlot = puzzleGrid.querySelector('.slot');
+  if (!firstSlot) throw new Error('No slots');
+  const slotRect  = firstSlot.getBoundingClientRect();
+  const tileW     = slotRect.width;
+  const tileH     = slotRect.height;
+
+  // Canvas size = exact inner grid size (tiles + gaps)
+  const cols = COLS, rows = ROWS;
+  const canvasW = Math.round(cols * tileW + (cols - 1) * gapPx);
+  const canvasH = Math.round(rows * tileH + (rows - 1) * gapPx);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext('2d');
+
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // Source image dims (assume square is fine; arbitrary sizes okay)
+  const srcW = currentImageEl.naturalWidth || currentImageEl.width;
+  const srcH = currentImageEl.naturalHeight || currentImageEl.height;
+  const srcTileW = srcW / COLS;
+  const srcTileH = srcH / ROWS;
+
+  // For each grid slot in DOM order, find which piece is inside, then draw it
+  const slots = Array.from(puzzleGrid.querySelectorAll('.slot'));
+  for (let i = 0; i < slots.length; i++) {
+    const row = Math.floor(i / COLS);
+    const col = i % COLS;
+    const pieceEl = slots[i].firstElementChild;
+    if (!pieceEl) continue;
+
+    const pieceIdx = Number(pieceEl.dataset.piece); // 0..8 original piece index
+    const srcCol = pieceIdx % COLS;
+    const srcRow = Math.floor(pieceIdx / COLS);
+
+    // Destination top-left (include gaps)
+    const dx = Math.round(col * (tileW + gapPx));
+    const dy = Math.round(row * (tileH + gapPx));
+
+    // Draw that source sub-rect into destination tile box
+    ctx.drawImage(
+      currentImageEl,
+      Math.round(srcCol * srcTileW),
+      Math.round(srcRow * srcTileH),
+      Math.round(srcTileW),
+      Math.round(srcTileH),
+      dx,
+      dy,
+      Math.round(tileW),
+      Math.round(tileH)
+    );
+  }
+
+  return canvas;
+}
+
+// ── MINT SNAPSHOT (uses custom canvas render) ─────────
 async function mintSnapshot(){
   try{
     if(!puzzleGrid.children.length) throw new Error('No puzzle to mint');
+    if(!currentImageEl) throw new Error('No image loaded for this round');
 
     mintBtn.disabled=true; setMintStatus('⚙️ Warming up backend…');
     try{ await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`,{method:'HEAD',cache:'no-store'},4000); }catch{}
 
-    // Preload the background image used by tiles (helps html2canvas)
-    const firstSlot  = puzzleGrid.firstElementChild;
-    const firstPiece = firstSlot?.firstElementChild;
-    const bg         = firstPiece?.style?.backgroundImage;
-    const match      = bg && bg.match(/url\("(.*)"\)/);
-    const imgUrl     = match && match[1];
-    if(imgUrl){ setMintStatus('🖼️ Preloading image…'); await preloadImage(imgUrl); }
-
-    // Capture ONLY the puzzle grid as it appears on-screen
-    setMintStatus('🧩 Capturing snapshot…');
-    const canvas = await html2canvas(puzzleGrid, {
-      backgroundColor: '#ffffff',
-      useCORS: true,
-      allowTaint: false,
-      scale: Math.min(2, window.devicePixelRatio || 1),
-      logging: false
-    });
+    setMintStatus('🧩 Rendering board…');
+    const canvas   = renderBoardToCanvas();
     const snapshot = canvas.toDataURL('image/png');
 
     // Upload → image + metadata JSON
@@ -302,11 +365,11 @@ async function mintSnapshot(){
       body:JSON.stringify({
         image:snapshot,
         name:'Moncock Puzzle',
-        description:'Snapshot of your puzzle from Moncock Puzzle.',
+        description:'Snapshot of your puzzle from Moncock Puzzle (board as played).',
         attributes:[
           { trait_type:'Game',  value:'Puzzle' },
           { trait_type:'Timer', value:`${Math.max(0,timeLeft)}s` },
-          { trait_type:'Capture', value:'grid' }
+          { trait_type:'Capture', value:'grid-canvas' }
         ]
       })
     },25000);
@@ -333,9 +396,7 @@ async function mintSnapshot(){
     setMintStatus('⏱️ Waiting 1 confirmation…');
     await provider.waitForTransaction(tx.hash, 1);
 
-    // ✅ Do NOT change the reference image anymore
-    // previewImg.src = snapshot; // (removed)
-
+    // Leave the reference preview unchanged
     setMintStatus('🎉 Minted!');
     clearInterval(timerHandle);
     startBtn.disabled=false; restartBtn.disabled=false;
