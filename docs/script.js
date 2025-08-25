@@ -1,10 +1,11 @@
-// ✅ MONCOCK PUZZLE — script.js (wallet-first + normalize + canvas render + clean errors)
+ // ✅ MONCOCK PUZZLE — script.js
+// wallet-first + safe image loader + square normalize + canvas render mint
 
 // ── SETTINGS ──────────────────────────────────────────
-const NORMALIZE_SIZE = 600;           // square size for game tiles (px)
+const NORMALIZE_SIZE = 600;           // square size (px) used to normalize art
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
 const CHAIN_ID_HEX = '0x279F';        // 10143 (Monad Testnet)
-const API_BASE = '';                  // Netlify Functions base (empty in prod)
+const API_BASE = '';                  // Netlify redirect /api/* → functions
 const ROWS = 3, COLS = 3;
 
 // ── CONTRACT ABI ──────────────────────────────────────
@@ -57,13 +58,17 @@ function pickRandomImage(list) {
   return imageUrl(file);
 }
 
+// SAFE image loader: works for http(s) and data: URLs
 async function loadHTMLImage(url) {
   const img = new Image();
-  img.crossOrigin = 'anonymous';
+  const isData = /^data:/i.test(url);
+  const isHttp = /^https?:/i.test(url);
+  if (isHttp) img.crossOrigin = 'anonymous';
+
   return await new Promise((resolve, reject) => {
     img.onload  = () => resolve(img);
-    img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
-    img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
+    img.onerror = () => reject(new Error(`Failed to load image: ${isData ? '[data URL]' : url}`));
+    img.src = isData ? url : url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
   });
 }
 
@@ -251,7 +256,9 @@ if(restartBtn){
 }
 if(startBtn){
   startBtn.addEventListener('click', async ()=>{
+    // Require wallet before gameplay
     if (!signer) { alert('Please connect your wallet first.'); return; }
+
     try{
       startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
 
