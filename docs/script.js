@@ -154,11 +154,14 @@ async function finishConnect(ethersProvider) {
   if (startBtn) startBtn.disabled = false;
   if (mintBtn) mintBtn.disabled = false;
 }
+// 🔧 FIXED: prefer window.ethereum first; fallback to pool
 async function connectInjected() {
   console.log('[connect] trying injected provider…');
-  const injected = getInjectedProvider();
+  let injected = window.ethereum || null;
+  if (!injected) injected = getInjectedProvider();
+
   if (!injected) {
-    alert('No injected wallet found. Install/enable MetaMask/Rabby/Backpack or use their in-app browser.');
+    alert('No injected wallet found. Please install/enable MetaMask/Rabby or open this site in the wallet’s in-app browser.');
     return;
   }
   try {
@@ -286,7 +289,8 @@ async function mintSnapshot(){
     const firstSlot= puzzleGrid.firstElementChild;
     const firstPiece= firstSlot?.firstElementChild;
     const bg= firstPiece?.style?.backgroundImage;
-    const match= bg && bg.match(/url\\("(.*)"\\)/);
+    // 🔧 FIXED: proper regex (single escapes)
+    const match= bg && bg.match(/url\("(.*)"\)/);
     const imgUrl= match && match[1];
     if(imgUrl){ setMintStatus('🖼️ Preloading image…'); await preloadImage(imgUrl); }
 
@@ -331,7 +335,7 @@ async function mintSnapshot(){
 
     // 5) mint with METADATA JSON gateway URL
     const metaGateway = upload.uriGateway;
-    if(!metaGateway || !/^https?:\\/\\//.test(metaGateway)){
+    if(!metaGateway || !/^https?:\/\//.test(metaGateway)){
       console.error('Upload response:', upload);
       throw new Error('Invalid upload response: missing uriGateway');
     }
@@ -359,6 +363,10 @@ async function mintSnapshot(){
 }
 
 // ── WIRE UP ───────────────────────────────────────────
+// Let users play without a wallet; mint stays locked until connect
+if (startBtn) startBtn.disabled = false;
+if (mintBtn)  mintBtn.disabled  = true;
+
 if(mintBtn) mintBtn.addEventListener('click', mintSnapshot);
 if(connectInjectedBtn) connectInjectedBtn.addEventListener('click', connectInjected);
 if(connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
