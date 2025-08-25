@@ -1,118 +1,85 @@
 // netlify/functions/upload.js
-// Uses Node 18 built-ins: fetch, FormData, Blob
-
-const PINATA_FILE_URL = "https://api.pinata.cloud/pinning/pinFileToIPFS";
-const PINATA_JSON_URL = "https://api.pinata.cloud/pinning/pinJSONToIPFS";
+// Node 18+ (fetch, FormData, Blob built-in)
 
 export async function handler(event) {
   try {
-    // (unchanged) warmup ping for your frontend
+    // Warmup ping
     if (event.httpMethod === 'HEAD' && event.queryStringParameters?.warm === '1') {
       return { statusCode: 204 };
     }
 
-    // (unchanged) allow only POST
     if (event.httpMethod !== 'POST') {
       return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
-    // (CHANGED) accept optional name/description/attributes for metadata
     const { image, name, description, attributes } = JSON.parse(event.body || '{}');
     if (!image || !image.startsWith('data:image/')) {
-      return json(400, { error: 'Missing or invalid image data (expected data:image/... base64 URL)' });
+      return { statusCode: 400, body: JSON.stringify({ error: 'Missing or invalid image data' }) };
     }
 
-    // (CHANGED) ensure Pinata auth is present
-    const jwt = process.env.PINATA_JWT;
-    if (!jwt) {
-      return json(500, { error: 'Server misconfigured: PINATA_JWT is not set.' });
-    }
-
-    // (unchanged) decode data URL -> bytes
+    // Decode base64 PNG
     const base64 = image.split(',')[1];
     const bytes = Buffer.from(base64, 'base64');
 
-    // (CHANGED) 1) upload the image to Pinata
-    const fileForm = new FormData();
-    fileForm.append('file', new Blob([bytes], { type: 'image/png' }), 'puzzle.png');
+    // ---- 1) Upload image to Pinata ----
+    const formImg = new FormData();
+    formImg.append('file', new Blob([bytes], { type: 'image/png' }), 'puzzle.png');
 
-    // Optional: Pinata metadata/options (uncomment if you want)
-    // fileForm.append('pinataMetadata', new Blob([JSON.stringify({ name: "moncock-puzzle-image" })], { type: 'application/json' }));
-    // fileForm.append('pinataOptions',  new Blob([JSON.stringify({ cidVersion: 1 })], { type: 'application/json' }));
-
-    const fileRes = await fetch(PINATA_FILE_URL, {
+    const pinataFile = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${jwt}` },
-      body: fileForm,
+      headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
+      body: formImg,
     });
 
-    if (!fileRes.ok) {
-      const errText = await safeText(fileRes);
-      return json(fileRes.status, { error: `Image upload failed: ${errText || fileRes.statusText}` });
+    if (!pinataFile.ok) {
+      const txt = await pinataFile.text();
+      return { statusCode: pinataFile.status, body: JSON.stringify({ error: txt }) };
     }
-
-    const fileJson = await fileRes.json();
-    const imageCid = fileJson?.IpfsHash;
-    if (!imageCid) return json(500, { error: 'Pinata image response missing IpfsHash' });
-
-    const imageIpfs = `ipfs://${imageCid}`;
+    const fileJson = await pinataFile.json();
+    const imageCid = fileJson.IpfsHash;
+    const imageUri = `ipfs://${imageCid}`;
     const imageGateway = `https://gateway.pinata.cloud/ipfs/${imageCid}`;
 
-    // (CHANGED) 2) build metadata JSON
+    // ---- 2) Build metadata JSON ----
     const metadata = {
       name: name || 'Moncock Puzzle',
-      description: description || 'Snapshot of your puzzle from Moncock Puzzle.',
-      image: imageIpfs, // ipfs:// (wallets understand this)
-      attributes: Array.isArray(attributes) ? attributes : [
-        { trait_type: 'Game', value: 'Puzzle' },
-        { trait_type: 'Timer', value: '30s' }
-      ]
+      description: description || 'Snapshot of your puzzle from Moncock Puzzle',
+      image: imageUri,
+      attributes: Array.isArray(attributes) ? attributes : [],
     };
 
-    // (CHANGED) 3) upload metadata JSON to Pinata
-    const metaRes = await fetch(PINATA_JSON_URL, {
+    // ---- 3) Upload metadata JSON to Pinata ----
+    const formMeta = new FormData();
+    formMeta.append(
+      'file',
+      new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' }),
+      'metadata.json'
+    );
+
+    const pinataMeta = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(metadata),
+      headers: { Authorization: `Bearer ${process.env.PINATA_JWT}` },
+      body: formMeta,
     });
 
-    if (!metaRes.ok) {
-      const errText = await safeText(metaRes);
-      return json(metaRes.status, { error: `Metadata upload failed: ${errText || metaRes.statusText}` });
+    if (!pinataMeta.ok) {
+      const txt = await pinataMeta.text();
+      return { statusCode: pinataMeta.status, body: JSON.stringify({ error: txt }) };
     }
+    const metaJson = await pinataMeta.json();
+    const metaCid = metaJson.IpfsHash;
+    const metaUri = `ipfs://${metaCid}`;
+    const uriGateway = `https://gateway.pinata.cloud/ipfs/${metaCid}`;
 
-    const metaJson = await metaRes.json();
-    const metaCid = metaJson?.IpfsHash;
-    if (!metaCid) return json(500, { error: 'Pinata metadata response missing IpfsHash' });
-
-    const metaIpfs = `ipfs://${metaCid}`;
-    const metaGateway = `https://gateway.pinata.cloud/ipfs/${metaCid}`;
-
-    // (CHANGED) 4) return both ipfs:// and HTTPS gateway URLs
-    return json(200, {
-      uri: metaIpfs,            // canonical IPFS URI
-      uriGateway: metaGateway,  // HTTPS JSON URL (use this in mint to avoid "lost metadata")
-      imageGateway,             // handy for previews
-    });
+    // ---- 4) Return both ----
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ imageGateway, uri: metaUri, uriGateway }),
+      headers: { 'content-type': 'application/json' },
+    };
 
   } catch (err) {
-    console.error(err);
-    return json(500, { error: err?.message || 'Internal Error' });
+    console.error('[upload] error', err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Internal Error' }) };
   }
-}
-
-/* ==== helpers (new) ==== */
-function json(status, obj) {
-  return {
-    statusCode: status,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(obj),
-  };
-}
-
-async function safeText(res) {
-  try { return await res.text(); } catch { return ''; }
 }
