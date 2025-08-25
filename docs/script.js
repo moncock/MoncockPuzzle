@@ -1,4 +1,4 @@
-// ✅ MONCOCK PUZZLE — script.js (full, metadata-fixed, 30s timer, local assets)
+// ✅ MONCOCK PUZZLE — script.js (full, exact-on-screen mint, 30s timer)
 
 // ── CONFIG ────────────────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
@@ -38,7 +38,7 @@ const ABI = [
   { "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }], "name": "tokenURI", "outputs": [{ "internalType": "string", "name": "", "type": "string" }], "stateMutability": "view", "type": "function" }
 ];
 
-// ── ASSETS: load from THIS SITE (no jsDelivr) ─────────
+// ── ASSETS (served from your site) ────────────────────
 const API_BASE = ''; // Netlify Functions base (empty in prod)
 let imageList = [];
 
@@ -306,7 +306,7 @@ if (restartBtn) {
   restartBtn.addEventListener('click', () => {
     clearInterval(timerHandle);
     puzzleGrid.innerHTML = '';
-    timeLeftEl.textContent = '30';   // ⏱ reset shows 30
+    timeLeftEl.textContent = '30';
     startBtn.disabled = false;
     mintBtn.disabled = true;
     restartBtn.disabled = true;
@@ -327,7 +327,7 @@ if (startBtn) {
     buildPuzzle(url);
     startTimer();
 
-    restartBtn.disabled = false;     // ✅ allow restart immediately
+    restartBtn.disabled = false; // allow immediate restart
   });
 }
 
@@ -359,7 +359,7 @@ async function fetchWithTimeout(url, opts = {}, ms = 20000) {
   }
 }
 
-// ── MINT SNAPSHOT via SERVER API (✅ metadata fixed) ──
+// ── MINT SNAPSHOT via SERVER API (EXACT on-screen rect) ──
 async function mintSnapshot() {
   try {
     if (!puzzleGrid.children.length) throw new Error('No puzzle to mint');
@@ -367,10 +367,10 @@ async function mintSnapshot() {
     mintBtn.disabled = true;
     setMintStatus('⚙️ Warming up backend…');
 
-    // pre-warm Netlify (best-effort)
+    // best-effort warmup
     try { await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`, { method: 'HEAD', cache: 'no-store' }, 4000); } catch {}
 
-    // ensure original image cached
+    // ensure background image cached (helps html2canvas)
     const firstSlot  = puzzleGrid.firstElementChild;
     const firstPiece = firstSlot?.firstElementChild;
     const bg         = firstPiece?.style?.backgroundImage;
@@ -381,21 +381,30 @@ async function mintSnapshot() {
       await preloadImage(imgUrl);
     }
 
-    // capture snapshot
+    // === core fix: screenshot the exact DOM rectangle the user sees ===
     setMintStatus('🧩 Capturing snapshot…');
-    const canvas = await html2canvas(puzzleGrid, {
-      width:  puzzleGrid.clientWidth,
-      height: puzzleGrid.clientHeight,
+
+    const rect = puzzleGrid.getBoundingClientRect();
+    const canvas = await html2canvas(document.body, {
+      x: Math.round(rect.left + window.scrollX),
+      y: Math.round(rect.top  + window.scrollY),
+      width:  Math.round(rect.width),
+      height: Math.round(rect.height),
+
+      windowWidth:  document.documentElement.scrollWidth,
+      windowHeight: document.documentElement.scrollHeight,
+
       backgroundColor: '#ffffff',
       useCORS: true,
       allowTaint: false,
-      imageTimeout: 0,
-      scale: 1,
+      scale: Math.min(2, window.devicePixelRatio || 1),
       logging: false
     });
+
+    // This is exactly what the player sees
     const snapshot = canvas.toDataURL('image/png');
 
-    // upload to Netlify/Pinata (server creates image + metadata)
+    // === upload to function → pins image + metadata JSON ===
     setMintStatus('☁️ Uploading to IPFS…');
     const res = await fetchWithTimeout(`${API_BASE}/api/upload`, {
       method: 'POST',
@@ -406,7 +415,7 @@ async function mintSnapshot() {
         description: 'Snapshot of your puzzle from Moncock Puzzle.',
         attributes: [
           { trait_type: 'Game', value: 'Puzzle' },
-          { trait_type: 'Timer', value: '30s' }
+          { trait_type: 'Timer', value: `${Math.max(0, timeLeft)}s` }
         ]
       })
     }, 25000);
@@ -418,19 +427,16 @@ async function mintSnapshot() {
 
     const upload = await res.json();
 
-    // ✅ Use HTTPS metadata JSON returned by backend (critical!)
+    // ✅ use HTTPS metadata JSON returned by backend
     const metaGateway = upload.uriGateway;
     if (!metaGateway || !/^https?:\/\//.test(metaGateway)) {
       console.error('Upload response:', upload);
       throw new Error('Invalid upload response: missing uriGateway');
     }
-    console.log('[mint] metadata gateway:', metaGateway);
-
-    // warm gateways (non-blocking)
     (async () => { try { await warm(metaGateway, 2); } catch {} })();
     (async () => { try { if (upload.imageGateway) await warm(upload.imageGateway, 1); } catch {} })();
 
-    // mint on-chain with METADATA JSON (not the image!)
+    // === mint with METADATA JSON URL ===
     setMintStatus('⛓️ Sending transaction…');
     const to = await signer.getAddress();
     const tx = await contract.mintNFT(to, metaGateway);
@@ -439,7 +445,7 @@ async function mintSnapshot() {
     await provider.waitForTransaction(tx.hash, 1);
 
     // done
-    previewImg.src = snapshot;
+    previewImg.src = snapshot; // show exactly what got minted
     setMintStatus('🎉 Minted!');
     clearInterval(timerHandle);
     startBtn.disabled = false;
