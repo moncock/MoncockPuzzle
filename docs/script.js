@@ -1,8 +1,8 @@
-// ✅ MONCOCK PUZZLE — script.js (full, toggle capture target, exact-on-screen mint)
+// ✅ MONCOCK PUZZLE — script.js (grid-only capture; keep reference unchanged)
 
 // ── SETTINGS ──────────────────────────────────────────
-// Change this to 'grid' (just the puzzle board) or 'row' (reference + puzzle)
-const CAPTURE_TARGET = 'grid'; // 'grid' | 'row'
+// Capture only the puzzle board on the right
+const CAPTURE_TARGET = 'grid'; // fixed to grid
 
 // ── CONTRACT CONFIG ───────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
@@ -43,13 +43,10 @@ const ABI = [
 ];
 
 // ── ASSETS (served from your site) ────────────────────
-const API_BASE = ''; // Netlify Functions base (empty in prod)
+const API_BASE = '';
 let imageList = [];
 
-function imageUrl(file) {
-  // files are at docs/asset/images → served as /asset/images/<file>
-  return `${location.origin}/asset/images/${file}`;
-}
+function imageUrl(file) { return `${location.origin}/asset/images/${file}`; }
 
 async function loadImageList() {
   const url = `${location.origin}/list.json?t=${Date.now()}`;
@@ -154,7 +151,7 @@ async function finishConnect(ethersProvider) {
   if (startBtn) startBtn.disabled = false;
   if (mintBtn) mintBtn.disabled = false;
 }
-// 🔧 FIXED: prefer window.ethereum first; fallback to pool
+// Prefer window.ethereum; fallback to pool
 async function connectInjected() {
   console.log('[connect] trying injected provider…');
   let injected = window.ethereum || null;
@@ -270,7 +267,7 @@ async function fetchWithTimeout(url,opts={},ms=20000){
   try{ return await fetch(url,{...opts,signal:ctrl.signal}); } finally{ clearTimeout(t); }
 }
 
-// ── MINT SNAPSHOT (exact element capture; toggle grid/row) ──
+// ── MINT SNAPSHOT (grid-only; keep reference unchanged) ──
 async function mintSnapshot(){
   try{
     if(!puzzleGrid.children.length) throw new Error('No puzzle to mint');
@@ -278,39 +275,26 @@ async function mintSnapshot(){
     mintBtn.disabled=true; setMintStatus('⚙️ Warming up backend…');
     try{ await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`,{method:'HEAD',cache:'no-store'},4000); }catch{}
 
-    // 1) choose WHAT to capture
-    const targetEl = (CAPTURE_TARGET === 'row')
-      ? document.querySelector('.game-row')
-      : puzzleGrid;
-
-    if(!targetEl) throw new Error('Capture target not found');
-
-    // 2) preload background image (helps html2canvas)
-    const firstSlot= puzzleGrid.firstElementChild;
-    const firstPiece= firstSlot?.firstElementChild;
-    const bg= firstPiece?.style?.backgroundImage;
-    // 🔧 FIXED: proper regex (single escapes)
-    const match= bg && bg.match(/url\("(.*)"\)/);
-    const imgUrl= match && match[1];
+    // Preload the background image used by tiles (helps html2canvas)
+    const firstSlot  = puzzleGrid.firstElementChild;
+    const firstPiece = firstSlot?.firstElementChild;
+    const bg         = firstPiece?.style?.backgroundImage;
+    const match      = bg && bg.match(/url\("(.*)"\)/);
+    const imgUrl     = match && match[1];
     if(imgUrl){ setMintStatus('🖼️ Preloading image…'); await preloadImage(imgUrl); }
 
-    // 3) capture EXACTLY the element we want (stable, no offsets)
+    // Capture ONLY the puzzle grid as it appears on-screen
     setMintStatus('🧩 Capturing snapshot…');
-    const rect = targetEl.getBoundingClientRect();
-    const canvas = await html2canvas(targetEl, {
+    const canvas = await html2canvas(puzzleGrid, {
       backgroundColor: '#ffffff',
       useCORS: true,
       allowTaint: false,
       scale: Math.min(2, window.devicePixelRatio || 1),
-      scrollX: -window.scrollX,
-      scrollY: -window.scrollY,
-      width:  Math.round(rect.width),
-      height: Math.round(rect.height),
-      logging: false,
+      logging: false
     });
     const snapshot = canvas.toDataURL('image/png');
 
-    // 4) upload → image + metadata JSON
+    // Upload → image + metadata JSON
     setMintStatus('☁️ Uploading to IPFS…');
     const res = await fetchWithTimeout(`${API_BASE}/api/upload`,{
       method:'POST',
@@ -322,7 +306,7 @@ async function mintSnapshot(){
         attributes:[
           { trait_type:'Game',  value:'Puzzle' },
           { trait_type:'Timer', value:`${Math.max(0,timeLeft)}s` },
-          { trait_type:'Capture', value: CAPTURE_TARGET }
+          { trait_type:'Capture', value:'grid' }
         ]
       })
     },25000);
@@ -333,7 +317,7 @@ async function mintSnapshot(){
     }
     const upload = await res.json();
 
-    // 5) mint with METADATA JSON gateway URL
+    // Mint with metadata JSON gateway URL
     const metaGateway = upload.uriGateway;
     if(!metaGateway || !/^https?:\/\//.test(metaGateway)){
       console.error('Upload response:', upload);
@@ -349,7 +333,9 @@ async function mintSnapshot(){
     setMintStatus('⏱️ Waiting 1 confirmation…');
     await provider.waitForTransaction(tx.hash, 1);
 
-    previewImg.src = snapshot; // show exactly what got minted
+    // ✅ Do NOT change the reference image anymore
+    // previewImg.src = snapshot; // (removed)
+
     setMintStatus('🎉 Minted!');
     clearInterval(timerHandle);
     startBtn.disabled=false; restartBtn.disabled=false;
@@ -363,7 +349,7 @@ async function mintSnapshot(){
 }
 
 // ── WIRE UP ───────────────────────────────────────────
-// Let users play without a wallet; mint stays locked until connect
+// Allow playing without a wallet; mint stays locked until connect
 if (startBtn) startBtn.disabled = false;
 if (mintBtn)  mintBtn.disabled  = true;
 
