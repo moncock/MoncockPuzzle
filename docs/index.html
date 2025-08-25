@@ -17,8 +17,7 @@
         <li>Start Game</li>
         <li>Each round you’ll receive a unique Moncock artwork, created by talented artists such as Laquita Reed, Sanji Vinsmoke, Asura14, and J J.</li>
         <li>Rearrange the scrambled pieces and restore the image before the timer runs out.</li>
-        <li>You can mint any time.If you complete the puzzle, your NFT will look better and might receive a higher rank. Even if you can’t finish, you can still mint but completed puzzles give you the best results.</li>
-      
+        <li>You can mint any time. If you complete the puzzle, your NFT will look better and might receive a higher rank. Even if you can’t finish, you can still mint but completed puzzles give you the best results.</li>
       </ol>
     </div>
 
@@ -27,40 +26,44 @@
       <button id="connectWalletConnectBtn">🔗 WalletConnect</button>
       <span id="walletStatus"></span>
     </div>
+
     <div class="controls">
       <button id="startBtn" disabled>🎮 Start Game</button>
       <button id="mintBtn" disabled>💎 Mint NFT</button>
       <button id="restartBtn" disabled>🔄 Restart</button>
     </div>
+
     <div id="mintStatus" style="margin-top:.5rem;font-size:.9rem;color:#4c51bf;"></div>
 
-    <div class="timer">⏲️ Time Left: <span id="timeLeft">45</span>s</div>
+    <!-- ⏱ default text updated to 30 -->
+    <div class="timer">⏲️ Time Left: <span id="timeLeft">30</span>s</div>
 
     <div class="game-row">
+      <!-- ✅ PREVIEW stays a plain <img> (not a grid) -->
       <div class="preview">
         <h3>Reference Picture</h3>
         <img id="previewImg" src="preview.png" alt="Puzzle Reference" />
       </div>
+
+      <!-- ✅ PUZZLE GRID -->
       <div id="puzzleGrid" class="grid"></div>
     </div>
   </div>
 
-  <!-- Load libs FIRST so globals exist for script.js -->
+  <!-- Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <!-- Filtered error logger: only logs errors from our own script.js -->
   <script>
     window.addEventListener('error', function (e) {
-      // Only handle errors that originate from our app file (script.js)
       if (!e.filename || !/\/script\.js(\?.*)?$/.test(e.filename)) return;
-      // Show a non-blocking console message instead of an alert
       console.error('App JS error:', e.message, 'at', e.filename + ':' + e.lineno + ':' + e.colno);
     });
   </script>
 
-  <!-- Your application logic (cache-busted) -->
-  <script src="script.js?v=3" defer></script>
+  <!-- App logic (cache-busted to pull the latest 30s timer + fixes) -->
+  <script src="script.js?v=4" defer></script>
 
   <!-- Safety net: ensure the Connect button always works -->
   <script>
@@ -76,7 +79,6 @@
           if (typeof window.connectInjected === 'function') {
             window.connectInjected();
           } else {
-            // gentle message if app not ready yet
             console.warn('App not ready yet—trying again soon.');
           }
         });
