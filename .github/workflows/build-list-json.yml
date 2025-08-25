@@ -1,33 +1,82 @@
-name: Build list.json
+name: Update list.json on image changes
 
 on:
   push:
+    branches: [ main ]
     paths:
-      - "docs/asset/images/**"          # run when images change
-      - ".github/workflows/build-list-json.yml"
+      - "docs/asset/images/**"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-list:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-      - name: Generate docs/asset/list.json
+          node-version: "20"
+
+      - name: Generate docs/list.json
         run: |
-          node -e "const fs=require('fs');const p='docs/asset/images';const out='docs/asset/list.json';const files=fs.readdirSync(p).filter(f=>/\.(png|jpg|jpeg|gif|svg)$/i.test(f)).sort();fs.writeFileSync(out, JSON.stringify(files,null,2)+'\n');console.log('Wrote',out,'with',files.length,'items');"
-      - name: Commit & push if changed
+          mkdir -p scripts
+          cat > scripts/gen-list.mjs <<'EOF'
+          import { readdirSync, writeFileSync, statSync } from "fs";
+          const IMAGES_DIR = "docs/asset/images";
+          const LIST_PATH  = "docs/list.json";
+          const exts = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
+
+          function walkImages(dir) {
+            const out = [];
+            const entries = readdirSync(dir, { withFileTypes: true });
+            for (const e of entries) {
+              if (e.isDirectory()) continue;
+              const name = e.name;
+              const lower = name.toLowerCase();
+              const dot = lower.lastIndexOf(".");
+              const ext = dot >= 0 ? lower.slice(dot) : "";
+              if (exts.has(ext)) out.push(name);
+            }
+            // natural-ish sort so puzzle2 < puzzle10
+            out.sort((a, b) => (a.length - b.length) || a.localeCompare(b, 'en', { numeric: true }));
+            return out;
+          }
+
+          function main() {
+            try {
+              const s = statSync(IMAGES_DIR);
+              if (!s.isDirectory()) throw new Error(`${IMAGES_DIR} is not a directory`);
+              const files = walkImages(IMAGES_DIR);
+              const json = JSON.stringify(files, null, 2) + "\n";
+              writeFileSync(LIST_PATH, json);
+              console.log(`Wrote ${LIST_PATH} with ${files.length} entries.`);
+            } catch (err) {
+              console.error("Failed to build list.json:", err);
+              process.exit(1);
+            }
+          }
+          main();
+          EOF
+          node scripts/gen-list.mjs
+
+      - name: Commit changes
         run: |
-          if [[ -n $(git status --porcelain docs/asset/list.json) ]]; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add docs/asset/list.json
-            git commit -m "chore: auto-update docs/asset/list.json"
-            git push
-          else
-            echo "No changes to commit."
+          if git diff --quiet docs/list.json; then
+            echo "No changes to list.json"
+            exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/list.json
+          git commit -m "chore: auto-update docs/list.json"
+          git push
+
+      - name: Purge jsDelivr cache for list.json
+        run: |
+          # 👇 Update these if your GitHub owner/repo or branch is different
+          curl -sS "https://purge.jsdelivr.net/gh/moncock/MoncockPuzzle@main/docs/list.json" || true
