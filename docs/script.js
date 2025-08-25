@@ -413,21 +413,23 @@ async function mintSnapshot() {
     const metaUri    = upload.uri;            // ipfs://<metadataCID>
     const imgGateway = upload.imageGateway;   // https://gateway.pinata.cloud/ipfs/<imageCID>
 
-    // use HTTPS metadata URL so explorers can read it
-    const metaGateway = metaUri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
-    console.log('[mint] metadata gateway:', metaGateway);
+// ✅ use uriGateway returned from backend
+const metaGateway = upload.uriGateway;
+if (!metaGateway) throw new Error('Upload response missing uriGateway');
+console.log('[mint] metadata gateway:', metaGateway);
 
-    // warm gateways (non-blocking)
-    (async () => { try { await warm(metaGateway, 2); } catch {} })();
-    (async () => { try { if (imgGateway) await warm(imgGateway, 1); } catch {} })();
+// warm gateways (non-blocking)
+(async () => { try { await warm(metaGateway, 2); } catch {} })();
+(async () => { try { if (upload.imageGateway) await warm(upload.imageGateway, 1); } catch {} })();
 
-    // mint on-chain with HTTPS metadata URL
-    setMintStatus('⛓️ Sending transaction…');
-    const to = await signer.getAddress();
-    const tx = await contract.mintNFT(to, metaGateway);
+// mint on-chain with HTTPS metadata JSON
+setMintStatus('⛓️ Sending transaction…');
+const to = await signer.getAddress();
+const tx = await contract.mintNFT(to, metaGateway);
 
-    setMintStatus('⏱️ Waiting 1 confirmation…');
-    await provider.waitForTransaction(tx.hash, 1);
+setMintStatus('⏱️ Waiting 1 confirmation…');
+await provider.waitForTransaction(tx.hash, 1);
+
 
     // done
     previewImg.src = snapshot;
