@@ -1,10 +1,10 @@
-// ✅ MONCOCK PUZZLE — script.js (square-normalize + canvas render mint)
+// ✅ MONCOCK PUZZLE — script.js (wallet-first + normalize + canvas render + clean errors)
 
 // ── SETTINGS ──────────────────────────────────────────
-const NORMALIZE_SIZE = 600;           // square canvas for gameplay tiles (px)
+const NORMALIZE_SIZE = 600;           // square size for game tiles (px)
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
 const CHAIN_ID_HEX = '0x279F';        // 10143 (Monad Testnet)
-const API_BASE = '';                  // Netlify functions base (empty in prod)
+const API_BASE = '';                  // Netlify Functions base (empty in prod)
 const ROWS = 3, COLS = 3;
 
 // ── CONTRACT ABI ──────────────────────────────────────
@@ -42,7 +42,7 @@ const ABI = [
   { "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }], "name": "tokenURI", "outputs": [{ "internalType": "string", "name": "", "type": "string" }], "stateMutability": "view", "type": "function" }
 ];
 
-// ── ASSETS HELPERS ───────────────────────────────────
+// ── ASSET HELPERS ─────────────────────────────────────
 function imageUrl(file) { return `${location.origin}/asset/images/${file}`; }
 
 async function loadImageList() {
@@ -53,7 +53,6 @@ async function loadImageList() {
 }
 
 function pickRandomImage(list) {
-  if (!list?.length) return 'preview.png';
   const file = list[Math.floor(Math.random() * list.length)];
   return imageUrl(file);
 }
@@ -61,14 +60,14 @@ function pickRandomImage(list) {
 async function loadHTMLImage(url) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
-  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url + (url.includes('?')?'&':'?') + 'cb=' + Date.now(); });
-  return img;
+  return await new Promise((resolve, reject) => {
+    img.onload  = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
+  });
 }
 
-/**
- * Normalize any aspect ratio into a square PNG dataURL.
- * The image is fit entirely inside (letterboxed) on a white background.
- */
+/** Normalize any aspect ratio to a square dataURL (letterboxed on white) */
 async function normalizeImage(url, size = NORMALIZE_SIZE, bg = '#ffffff') {
   const img = await loadHTMLImage(url);
   const canvas = document.createElement('canvas');
@@ -100,7 +99,7 @@ const previewImg              = document.getElementById('previewImg');
 // ── STATE ─────────────────────────────────────────────
 let provider, signer, contract;
 let imageList = [];
-let currentImageEl = null;  // HTMLImageElement (normalized)
+let currentImageEl = null;  // normalized <img> used for minting
 let timerHandle, timeLeft = 30;
 let draggedPiece = null, sourceSlot = null;
 
@@ -151,9 +150,10 @@ async function finishConnect(ethersProvider){
   provider=ethersProvider; signer=provider.getSigner();
   contract=new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
   const addr=await signer.getAddress();
-  if(walletStatus) walletStatus.textContent=`Connected: ${addr.slice(0,6)}...${addr.slice(-4)} (Monad)`;
-  if(startBtn) startBtn.disabled=false;
-  if(mintBtn)  mintBtn.disabled=false;
+  if (walletStatus) walletStatus.textContent = `Connected: ${addr.slice(0,6)}...${addr.slice(-4)} (Monad)`;
+  // enable gameplay & mint AFTER wallet connects
+  if (startBtn) startBtn.disabled = false;
+  if (mintBtn)  mintBtn.disabled  = false;
 }
 async function connectInjected(){
   console.log('[connect] injected…');
@@ -166,7 +166,7 @@ async function connectInjected(){
     await switchToMonad(ethersProvider);
     await finishConnect(ethersProvider);
   }catch(err){
-    console.error('[wallet] connect failed:',err);
+    console.error('[wallet] connect failed:', err);
     const code=err?.code;
     if(code===4001) alert('Connection rejected in wallet.');
     else if(code===-32002) alert('A connection request is already pending—open your wallet popup.');
@@ -251,25 +251,27 @@ if(restartBtn){
 }
 if(startBtn){
   startBtn.addEventListener('click', async ()=>{
+    if (!signer) { alert('Please connect your wallet first.'); return; }
     try{
       startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
 
       if(!imageList.length) imageList = await loadImageList();
+      if(!imageList.length){ alert('No puzzle images found (list.json is empty).'); startBtn.disabled=false; return; }
       const originalUrl = pickRandomImage(imageList);
 
-      // Normalize to a square dataURL → then load as <img> for mint/render
+      // Normalize to square and load for mint
       const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
       const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
       currentImageEl = normalizedImg;
 
-      // Show normalized preview and build puzzle from it
+      // Build puzzle from normalized image and show preview
       previewImg.src = normalizedDataUrl;
       buildPuzzle(normalizedDataUrl);
       startTimer();
       restartBtn.disabled=false;
     }catch(err){
       console.error('start error:', err);
-      alert('Failed to start game: ' + (err?.message || err));
+      alert('Failed to start game: ' + (err?.message || String(err)));
       startBtn.disabled=false;
     }
   });
@@ -295,7 +297,6 @@ function renderBoardToCanvas(){
 
   const computed = getComputedStyle(puzzleGrid);
   const gapPx = parseFloat(computed.gap || computed.gridGap || '0') || 0;
-
   const firstSlot = puzzleGrid.querySelector('.slot');
   if(!firstSlot) throw new Error('No slots');
   const slotRect = firstSlot.getBoundingClientRect();
@@ -307,7 +308,6 @@ function renderBoardToCanvas(){
   canvas.width = canvasW; canvas.height = canvasH;
   const ctx = canvas.getContext('2d');
 
-  // background same as site (white)
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvasW,canvasH);
 
   const srcW = currentImageEl.naturalWidth || currentImageEl.width;
@@ -340,7 +340,7 @@ function renderBoardToCanvas(){
   return canvas;
 }
 
-// ── MINT (server builds metadata; we pass image only) ─
+// ── MINT (server builds metadata; use uriGateway) ────
 async function mintSnapshot(){
   try{
     if(!puzzleGrid.children.length) throw new Error('No puzzle to mint');
@@ -357,11 +357,7 @@ async function mintSnapshot(){
     const res = await fetchWithTimeout(`${API_BASE}/api/upload`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        image:snapshot,
-        // optional: name/description/attributes can be omitted;
-        // server will build metadata regardless.
-      })
+      body:JSON.stringify({ image: snapshot }) // backend constructs metadata
     },25000);
 
     if(!res.ok){
@@ -398,20 +394,19 @@ async function mintSnapshot(){
   }
 }
 
-// ── WIRE UP ───────────────────────────────────────────
-if (startBtn) startBtn.disabled = false;  // can play without wallet
-if (mintBtn)  mintBtn.disabled  = true;   // mint gated until connect
+// ── WIRE UP (wallet-first) ────────────────────────────
+if (startBtn) startBtn.disabled = true;  // require wallet before playing
+if (mintBtn)  mintBtn.disabled  = true;
 
-if(mintBtn) mintBtn.addEventListener('click', mintSnapshot);
-if(connectInjectedBtn) connectInjectedBtn.addEventListener('click', connectInjected);
-if(connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
+if (mintBtn)                 mintBtn.addEventListener('click', mintSnapshot);
+if (connectInjectedBtn)      connectInjectedBtn.addEventListener('click', connectInjected);
+if (connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
 
-// ── INIT ──────────────────────────────────────────────
+// ── INIT (optional preview) ───────────────────────────
 (async function init(){
   try{
     imageList = await loadImageList();
     if(imageList.length){
-      // show a normalized preview immediately (random)
       const url = pickRandomImage(imageList);
       const normalized = await normalizeImage(url, NORMALIZE_SIZE);
       previewImg.src = normalized;
