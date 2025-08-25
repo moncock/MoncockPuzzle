@@ -1,6 +1,10 @@
-// ✅ MONCOCK PUZZLE — script.js (full, exact-on-screen mint, 30s timer)
+// ✅ MONCOCK PUZZLE — script.js (full, toggle capture target, exact-on-screen mint)
 
-// ── CONFIG ────────────────────────────────────────────
+// ── SETTINGS ──────────────────────────────────────────
+// Change this to 'grid' (just the puzzle board) or 'row' (reference + puzzle)
+const CAPTURE_TARGET = 'grid'; // 'grid' | 'row'
+
+// ── CONTRACT CONFIG ───────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
 const CHAIN_ID_HEX = '0x279F'; // 10143 (Monad Testnet)
 
@@ -42,14 +46,12 @@ const ABI = [
 const API_BASE = ''; // Netlify Functions base (empty in prod)
 let imageList = [];
 
-// Build absolute URLs served by Netlify from /docs
 function imageUrl(file) {
-  // images live at docs/asset/images → served as /asset/images/<file>
+  // files are at docs/asset/images → served as /asset/images/<file>
   return `${location.origin}/asset/images/${file}`;
 }
 
 async function loadImageList() {
-  // list is generated into docs/list.json → served as /list.json
   const url = `${location.origin}/list.json?t=${Date.now()}`;
   try {
     const res = await fetch(url, { cache: 'no-cache' });
@@ -96,7 +98,7 @@ const ROWS = 3, COLS = 3;
 // ── LOG ───────────────────────────────────────────────
 console.log('[boot] script.js loaded. ethers?', !!window.ethers);
 
-// ── HELPERS: Providers ────────────────────────────────
+// ── WALLET HELPERS ───────────────────────────────────
 function brandName(p) {
   if (!p) return 'Unknown';
   if (p.isMetaMask) return 'MetaMask';
@@ -110,7 +112,6 @@ function brandName(p) {
   if (p.isPhantom || p.isPhantomEthereum) return 'Phantom (EVM)';
   return 'Injected';
 }
-
 function getInjectedProvider() {
   const pool = [];
   const eth = window.ethereum;
@@ -122,12 +123,10 @@ function getInjectedProvider() {
   pool.sort((a,b)=> rank.indexOf(brandName(a)) - rank.indexOf(brandName(b)));
   return pool[0];
 }
-
 async function switchToMonad(ethersProvider) {
   try {
     const chainIdHex = await ethersProvider.send('eth_chainId', []);
     if (chainIdHex?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return;
-
     try {
       await ethersProvider.send('wallet_switchEthereumChain', [{ chainId: CHAIN_ID_HEX }]);
     } catch (e) {
@@ -146,7 +145,6 @@ async function switchToMonad(ethersProvider) {
     throw new Error('Failed to switch to Monad Testnet: ' + (err.message || err));
   }
 }
-
 async function finishConnect(ethersProvider) {
   provider = ethersProvider;
   signer   = provider.getSigner();
@@ -156,7 +154,6 @@ async function finishConnect(ethersProvider) {
   if (startBtn) startBtn.disabled = false;
   if (mintBtn) mintBtn.disabled = false;
 }
-
 async function connectInjected() {
   console.log('[connect] trying injected provider…');
   const injected = getInjectedProvider();
@@ -178,265 +175,169 @@ async function connectInjected() {
   }
 }
 window.connectInjected = connectInjected;
-
 function connectWalletConnect() { alert('WalletConnect coming soon 🤝'); }
 
-// ── ASSET HELPERS ─────────────────────────────────────
-function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
-
 // ── PUZZLE (fixed slots) ──────────────────────────────
-function makeSlot(i) {
-  const slot = document.createElement('div');
-  slot.className = 'slot';
-  slot.dataset.slot = i;
-  slot.addEventListener('dragover', (e) => { e.preventDefault(); });
-  slot.addEventListener('dragenter', (e) => { e.preventDefault(); });
-  slot.addEventListener('drop', (e) => handleDropOnSlot(e, slot));
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } }
+function makeSlot(i){
+  const slot=document.createElement('div');
+  slot.className='slot'; slot.dataset.slot=i;
+  slot.addEventListener('dragover',e=>e.preventDefault());
+  slot.addEventListener('dragenter',e=>e.preventDefault());
+  slot.addEventListener('drop',e=>handleDropOnSlot(e,slot));
   return slot;
 }
-
-function makePiece(i, imgUrl, tileW, tileH) {
-  const cell = document.createElement('div');
-  cell.className = 'cell';
-  cell.dataset.piece = i;
-
-  const x = (i % COLS) * tileW;
-  const y = Math.floor(i / COLS) * tileH;
-
-  Object.assign(cell.style, {
-    backgroundImage: `url(${imgUrl})`,
-    backgroundSize: `${COLS * tileW}px ${ROWS * tileH}px`,
-    backgroundPosition: `-${x}px -${y}px`,
-    width: '100%', height: '100%'
+function makePiece(i,imgUrl,tileW,tileH){
+  const cell=document.createElement('div');
+  cell.className='cell'; cell.dataset.piece=i;
+  const x=(i%COLS)*tileW, y=Math.floor(i/COLS)*tileH;
+  Object.assign(cell.style,{
+    backgroundImage:`url(${imgUrl})`,
+    backgroundSize:`${COLS*tileW}px ${ROWS*tileH}px`,
+    backgroundPosition:`-${x}px -${y}px`,
+    width:'100%',height:'100%'
   });
-
-  cell.draggable = true;
-
-  cell.addEventListener('dragstart', (e) => {
-    const parentSlot = cell.parentElement;
-    if (parentSlot?.classList.contains('locked')) { e.preventDefault(); return; }
-    draggedPiece = cell;
-    sourceSlot = parentSlot;
-    cell.classList.add('dragging');
-    e.dataTransfer.setData('text/plain', cell.dataset.piece);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.dropEffect = 'move';
-    const ghost = document.createElement('div'); ghost.style.width='1px'; ghost.style.height='1px';
+  cell.draggable=true;
+  cell.addEventListener('dragstart',e=>{
+    const parentSlot=cell.parentElement;
+    if(parentSlot?.classList.contains('locked')){ e.preventDefault(); return; }
+    draggedPiece=cell; sourceSlot=parentSlot; cell.classList.add('dragging');
+    e.dataTransfer.setData('text/plain',cell.dataset.piece);
+    e.dataTransfer.effectAllowed='move'; e.dataTransfer.dropEffect='move';
+    const ghost=document.createElement('div'); ghost.style.width='1px'; ghost.style.height='1px';
     document.body.appendChild(ghost); e.dataTransfer.setDragImage(ghost,0,0); setTimeout(()=>ghost.remove(),0);
   });
-
-  cell.addEventListener('dragend', () => {
-    cell.classList.remove('dragging');
-    draggedPiece = null; sourceSlot = null;
-  });
-
+  cell.addEventListener('dragend',()=>{ cell.classList.remove('dragging'); draggedPiece=null; sourceSlot=null; });
   return cell;
 }
-
-function handleDropOnSlot(e, targetSlot) {
-  e.preventDefault();
-  if (!draggedPiece) return;
-  if (targetSlot.classList.contains('locked')) return;
-  if (sourceSlot?.classList.contains('locked')) return;
-
-  const occupant = targetSlot.firstElementChild;
+function handleDropOnSlot(e,targetSlot){
+  e.preventDefault(); if(!draggedPiece) return;
+  if(targetSlot.classList.contains('locked')) return;
+  if(sourceSlot?.classList.contains('locked')) return;
+  const occupant=targetSlot.firstElementChild;
   targetSlot.appendChild(draggedPiece);
-  if (occupant) sourceSlot.appendChild(occupant);
-
-  checkAndLockSlot(targetSlot);
-  if (sourceSlot) checkAndLockSlot(sourceSlot);
+  if(occupant) sourceSlot.appendChild(occupant);
+  checkAndLockSlot(targetSlot); if(sourceSlot) checkAndLockSlot(sourceSlot);
 }
-
-function checkAndLockSlot(slot) {
-  const piece = slot.firstElementChild;
-  if (!piece) return;
-  const correct = Number(slot.dataset.slot) === Number(piece.dataset.piece);
-  if (correct) {
-    slot.classList.add('locked');
-    piece.classList.add('locked');
-    piece.draggable = false;
-  } else {
-    slot.classList.remove('locked');
-    piece.classList.remove('locked');
-    piece.draggable = true;
-  }
+function checkAndLockSlot(slot){
+  const piece=slot.firstElementChild; if(!piece) return;
+  const correct=Number(slot.dataset.slot)===Number(piece.dataset.piece);
+  if(correct){ slot.classList.add('locked'); piece.classList.add('locked'); piece.draggable=false; }
+  else{ slot.classList.remove('locked'); piece.classList.remove('locked'); piece.draggable=true; }
 }
-
-function buildPuzzle(imgUrl) {
-  puzzleGrid.innerHTML = '';
-
-  const slots = [];
-  for (let i = 0; i < ROWS * COLS; i++) {
-    const slot = makeSlot(i);
-    slots.push(slot);
-    puzzleGrid.appendChild(slot);
-  }
-
-  const slotRect = slots[0].getBoundingClientRect();
-  const tileW = slotRect.width;
-  const tileH = slotRect.height;
-
-  const pieces = [];
-  for (let i = 0; i < ROWS * COLS; i++) pieces.push(makePiece(i, imgUrl, tileW, tileH));
-  shuffle(pieces);
-
-  for (let i = 0; i < slots.length; i++) {
-    slots[i].appendChild(pieces[i]);
-    checkAndLockSlot(slots[i]);
-  }
+function buildPuzzle(imgUrl){
+  puzzleGrid.innerHTML='';
+  const slots=[]; for(let i=0;i<ROWS*COLS;i++){ const s=makeSlot(i); slots.push(s); puzzleGrid.appendChild(s); }
+  const r=slots[0].getBoundingClientRect(), tileW=r.width, tileH=r.height;
+  const pieces=[]; for(let i=0;i<ROWS*COLS;i++) pieces.push(makePiece(i,imgUrl,tileW,tileH));
+  shuffle(pieces); for(let i=0;i<slots.length;i++){ slots[i].appendChild(pieces[i]); checkAndLockSlot(slots[i]); }
 }
-
-function startTimer() {
-  clearInterval(timerHandle);
-  timeLeft = 30;                     // ⏱ now 30 seconds
-  timeLeftEl.textContent = timeLeft;
-  timerHandle = setInterval(() => {
-    timeLeftEl.textContent = --timeLeft;
-    if (timeLeft <= 0) {
-      clearInterval(timerHandle);
-      alert('⏳ Time’s up! This is your masterpiece — mint it or restart.');
-      startBtn.disabled = false;
-      restartBtn.disabled = false;
-    }
-  }, 1000);
+function startTimer(){
+  clearInterval(timerHandle); timeLeft=30; timeLeftEl.textContent=timeLeft;
+  timerHandle=setInterval(()=>{ timeLeftEl.textContent=--timeLeft;
+    if(timeLeft<=0){ clearInterval(timerHandle); alert('⏳ Time’s up! This is your masterpiece — mint it or restart.');
+      startBtn.disabled=false; restartBtn.disabled=false; }
+  },1000);
 }
 
 // ── GAME CONTROLS ─────────────────────────────────────
-if (restartBtn) {
-  restartBtn.addEventListener('click', () => {
-    clearInterval(timerHandle);
-    puzzleGrid.innerHTML = '';
-    timeLeftEl.textContent = '30';
-    startBtn.disabled = false;
-    mintBtn.disabled = true;
-    restartBtn.disabled = true;
+if(restartBtn){
+  restartBtn.addEventListener('click',()=>{
+    clearInterval(timerHandle); puzzleGrid.innerHTML=''; timeLeftEl.textContent='30';
+    startBtn.disabled=false; mintBtn.disabled=true; restartBtn.disabled=true;
+  });
+}
+if(startBtn){
+  startBtn.addEventListener('click',async()=>{
+    startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
+    if(!imageList.length) await loadImageList();
+    const url=pickRandomImage(); await preloadImage(url);
+    previewImg.src=url; buildPuzzle(url); startTimer(); restartBtn.disabled=false;
   });
 }
 
-if (startBtn) {
-  startBtn.addEventListener('click', async () => {
-    startBtn.disabled = true;
-    mintBtn.disabled = false;
-    restartBtn.disabled = true;
-
-    if (!imageList.length) await loadImageList();
-
-    const url = pickRandomImage();
-    await preloadImage(url);
-    previewImg.src = url;
-    buildPuzzle(url);
-    startTimer();
-
-    restartBtn.disabled = false; // allow immediate restart
-  });
+// ── HELPERS ───────────────────────────────────────────
+async function warm(url,tries=3){
+  for(let i=0;i<tries;i++){ try{ const r=await fetch(url+(url.includes('?')?'&':'?')+'cb='+Date.now(),{cache:'no-store'}); if(r.ok) return true; }catch(_){}
+    await new Promise(r=>setTimeout(r,600*(i+1))); } return false;
+}
+function setMintStatus(msg){ const el=document.getElementById('mintStatus'); if(el) el.textContent=msg; console.log('[mint]',msg); }
+async function fetchWithTimeout(url,opts={},ms=20000){
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),ms);
+  try{ return await fetch(url,{...opts,signal:ctrl.signal}); } finally{ clearTimeout(t); }
 }
 
-// ── Helpers ───────────────────────────────────────────
-async function warm(url, tries = 3) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fetch(url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) return true;
-    } catch (_) {}
-    await new Promise(r => setTimeout(r, 600 * (i + 1)));
-  }
-  return false;
-}
+// ── MINT SNAPSHOT (exact element capture; toggle grid/row) ──
+async function mintSnapshot(){
+  try{
+    if(!puzzleGrid.children.length) throw new Error('No puzzle to mint');
 
-function setMintStatus(msg) {
-  const el = document.getElementById('mintStatus');
-  if (el) el.textContent = msg;
-  console.log('[mint]', msg);
-}
+    mintBtn.disabled=true; setMintStatus('⚙️ Warming up backend…');
+    try{ await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`,{method:'HEAD',cache:'no-store'},4000); }catch{}
 
-async function fetchWithTimeout(url, opts = {}, ms = 20000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: ctrl.signal });
-  } finally {
-    clearTimeout(t);
-  }
-}
+    // 1) choose WHAT to capture
+    const targetEl = (CAPTURE_TARGET === 'row')
+      ? document.querySelector('.game-row')
+      : puzzleGrid;
 
-// ── MINT SNAPSHOT via SERVER API (EXACT on-screen rect) ──
-async function mintSnapshot() {
-  try {
-    if (!puzzleGrid.children.length) throw new Error('No puzzle to mint');
+    if(!targetEl) throw new Error('Capture target not found');
 
-    mintBtn.disabled = true;
-    setMintStatus('⚙️ Warming up backend…');
+    // 2) preload background image (helps html2canvas)
+    const firstSlot= puzzleGrid.firstElementChild;
+    const firstPiece= firstSlot?.firstElementChild;
+    const bg= firstPiece?.style?.backgroundImage;
+    const match= bg && bg.match(/url\\("(.*)"\\)/);
+    const imgUrl= match && match[1];
+    if(imgUrl){ setMintStatus('🖼️ Preloading image…'); await preloadImage(imgUrl); }
 
-    // best-effort warmup
-    try { await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`, { method: 'HEAD', cache: 'no-store' }, 4000); } catch {}
-
-    // ensure background image cached (helps html2canvas)
-    const firstSlot  = puzzleGrid.firstElementChild;
-    const firstPiece = firstSlot?.firstElementChild;
-    const bg         = firstPiece?.style?.backgroundImage;
-    const match      = bg && bg.match(/url\("(.*)"\)/);
-    const imgUrl     = match && match[1];
-    if (imgUrl) {
-      setMintStatus('🖼️ Preloading image…');
-      await preloadImage(imgUrl);
-    }
-
-    // === core fix: screenshot the exact DOM rectangle the user sees ===
+    // 3) capture EXACTLY the element we want (stable, no offsets)
     setMintStatus('🧩 Capturing snapshot…');
-
-    const rect = puzzleGrid.getBoundingClientRect();
-    const canvas = await html2canvas(document.body, {
-      x: Math.round(rect.left + window.scrollX),
-      y: Math.round(rect.top  + window.scrollY),
-      width:  Math.round(rect.width),
-      height: Math.round(rect.height),
-
-      windowWidth:  document.documentElement.scrollWidth,
-      windowHeight: document.documentElement.scrollHeight,
-
+    const rect = targetEl.getBoundingClientRect();
+    const canvas = await html2canvas(targetEl, {
       backgroundColor: '#ffffff',
       useCORS: true,
       allowTaint: false,
       scale: Math.min(2, window.devicePixelRatio || 1),
-      logging: false
+      scrollX: -window.scrollX,
+      scrollY: -window.scrollY,
+      width:  Math.round(rect.width),
+      height: Math.round(rect.height),
+      logging: false,
     });
-
-    // This is exactly what the player sees
     const snapshot = canvas.toDataURL('image/png');
 
-    // === upload to function → pins image + metadata JSON ===
+    // 4) upload → image + metadata JSON
     setMintStatus('☁️ Uploading to IPFS…');
-    const res = await fetchWithTimeout(`${API_BASE}/api/upload`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: snapshot,
-        name: 'Moncock Puzzle',
-        description: 'Snapshot of your puzzle from Moncock Puzzle.',
-        attributes: [
-          { trait_type: 'Game', value: 'Puzzle' },
-          { trait_type: 'Timer', value: `${Math.max(0, timeLeft)}s` }
+    const res = await fetchWithTimeout(`${API_BASE}/api/upload`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        image:snapshot,
+        name:'Moncock Puzzle',
+        description:'Snapshot of your puzzle from Moncock Puzzle.',
+        attributes:[
+          { trait_type:'Game',  value:'Puzzle' },
+          { trait_type:'Timer', value:`${Math.max(0,timeLeft)}s` },
+          { trait_type:'Capture', value: CAPTURE_TARGET }
         ]
       })
-    }, 25000);
+    },25000);
 
-    if (!res.ok) {
-      const text = await res.text().catch(()=>'');
+    if(!res.ok){
+      const text = await res.text().catch(()=> '');
       throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
     }
-
     const upload = await res.json();
 
-    // ✅ use HTTPS metadata JSON returned by backend
+    // 5) mint with METADATA JSON gateway URL
     const metaGateway = upload.uriGateway;
-    if (!metaGateway || !/^https?:\/\//.test(metaGateway)) {
+    if(!metaGateway || !/^https?:\\/\\//.test(metaGateway)){
       console.error('Upload response:', upload);
       throw new Error('Invalid upload response: missing uriGateway');
     }
-    (async () => { try { await warm(metaGateway, 2); } catch {} })();
-    (async () => { try { if (upload.imageGateway) await warm(upload.imageGateway, 1); } catch {} })();
+    (async()=>{ try{ await warm(metaGateway,2); }catch{} })();
+    (async()=>{ try{ if(upload.imageGateway) await warm(upload.imageGateway,1); }catch{} })();
 
-    // === mint with METADATA JSON URL ===
     setMintStatus('⛓️ Sending transaction…');
     const to = await signer.getAddress();
     const tx = await contract.mintNFT(to, metaGateway);
@@ -444,28 +345,26 @@ async function mintSnapshot() {
     setMintStatus('⏱️ Waiting 1 confirmation…');
     await provider.waitForTransaction(tx.hash, 1);
 
-    // done
     previewImg.src = snapshot; // show exactly what got minted
     setMintStatus('🎉 Minted!');
     clearInterval(timerHandle);
-    startBtn.disabled = false;
-    restartBtn.disabled = false;
+    startBtn.disabled=false; restartBtn.disabled=false;
     alert('🎉 Minted successfully!');
-  } catch (err) {
+  }catch(err){
     console.error(err);
     alert('Mint failed: ' + (err?.message || err));
-  } finally {
-    mintBtn.disabled = false;
+  }finally{
+    mintBtn.disabled=false;
   }
 }
 
-// ── WIRE UP BUTTONS ───────────────────────────────────
-if (mintBtn) mintBtn.addEventListener('click', mintSnapshot);
-if (connectInjectedBtn) connectInjectedBtn.addEventListener('click', connectInjected);
-if (connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
+// ── WIRE UP ───────────────────────────────────────────
+if(mintBtn) mintBtn.addEventListener('click', mintSnapshot);
+if(connectInjectedBtn) connectInjectedBtn.addEventListener('click', connectInjected);
+if(connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', connectWalletConnect);
 
 // ── INIT ──────────────────────────────────────────────
-(async function init() {
+(async function init(){
   await loadImageList();
-  if (imageList.length) previewImg.src = pickRandomImage();
+  if(imageList.length) previewImg.src = pickRandomImage();
 })();
