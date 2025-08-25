@@ -349,3 +349,14 @@ body, .grid { -webkit-user-drag: none; }
     transform: none !important;
   }
 }
+
+/* ✅ Preview integrity fix: the preview image must never be sliced like the grid */
+.preview img {
+  display: block;
+  object-fit: contain;
+  width: 100%;
+  height: auto;
+  background: none !important;
+  background-size: auto !important;
+  background-position: center !important;
+}
