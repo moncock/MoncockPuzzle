@@ -1,8 +1,8 @@
-// ✅ MONCOCK PUZZLE — script.js (full)
+// ✅ MONCOCK PUZZLE — script.js (full, 30s timer, local assets, restart fix)
 
 // ── CONFIG ────────────────────────────────────────────
 const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
-const CHAIN_ID_HEX = '0x279F'; // 10143
+const CHAIN_ID_HEX = '0x279F'; // 10143 (Monad Testnet)
 
 const ABI = [
   { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
@@ -38,14 +38,42 @@ const ABI = [
   { "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }], "name": "tokenURI", "outputs": [{ "internalType": "string", "name": "", "type": "string" }], "stateMutability": "view", "type": "function" }
 ];
 
-// ── ASSETS CONFIG ─────────────────────────────────────
-const GITHUB_OWNER  = 'moncock';
-const ASSETS_REPO   = 'MoncockPuzzle';
-const GITHUB_BRANCH = 'main';
-const IMAGES_PATH   = 'docs/asset/images';
+// ── ASSETS: load from THIS SITE (no jsDelivr) ─────────
+const API_BASE = ''; // Netlify Functions base (empty in prod)
+let imageList = [];
 
-// Netlify Functions base (empty in prod)
-const API_BASE = '';
+// Build absolute URLs served by Netlify from /docs
+function imageUrl(file) {
+  // images live at docs/asset/images → served as /asset/images/<file>
+  return `${location.origin}/asset/images/${file}`;
+}
+
+async function loadImageList() {
+  // list is generated into docs/list.json → served as /list.json
+  const url = `${location.origin}/list.json?t=${Date.now()}`;
+  try {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    imageList = await res.json();
+  } catch (e) {
+    console.error('list.json fetch failed:', e);
+    alert('⚠️ Could not load asset list.');
+  }
+}
+
+function pickRandomImage() {
+  if (!imageList.length) return 'preview.png';
+  const file = imageList[Math.floor(Math.random() * imageList.length)];
+  return imageUrl(file);
+}
+
+async function preloadImage(url) {
+  await new Promise((resolve, reject) => {
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = resolve; img.onerror = reject;
+    img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
+  });
+}
 
 // ── UI ELEMENTS ───────────────────────────────────────
 const connectInjectedBtn      = document.getElementById('connectInjectedBtn');
@@ -60,8 +88,7 @@ const previewImg              = document.getElementById('previewImg');
 
 // ── STATE ─────────────────────────────────────────────
 let provider, signer, contract;
-let imageList = [];
-let timerHandle, timeLeft = 45;
+let timerHandle, timeLeft = 30;
 let draggedPiece = null;
 let sourceSlot = null;
 const ROWS = 3, COLS = 3;
@@ -156,31 +183,6 @@ function connectWalletConnect() { alert('WalletConnect coming soon 🤝'); }
 
 // ── ASSET HELPERS ─────────────────────────────────────
 function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
-function pickRandomImage() {
-  if (!imageList.length) return 'preview.png';
-  const file = imageList[Math.floor(Math.random() * imageList.length)];
-  return `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/${IMAGES_PATH}/${file}`;
-}
-
-async function loadImageList() {
-  const url = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${ASSETS_REPO}@${GITHUB_BRANCH}/docs/asset/list.json?t=${Date.now()}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(res.status);
-    imageList = await res.json();
-  } catch (e) {
-    console.error('list.json fetch failed:', e);
-    alert('⚠️ Could not load asset list.');
-  }
-}
-
-async function preloadImage(url) {
-  await new Promise((resolve, reject) => {
-    const img = new Image(); img.crossOrigin = 'anonymous';
-    img.onload = resolve; img.onerror = reject;
-    img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
-  });
-}
 
 // ── PUZZLE (fixed slots) ──────────────────────────────
 function makeSlot(i) {
@@ -193,7 +195,7 @@ function makeSlot(i) {
   return slot;
 }
 
-function makePiece(i, imageUrl, tileW, tileH) {
+function makePiece(i, imgUrl, tileW, tileH) {
   const cell = document.createElement('div');
   cell.className = 'cell';
   cell.dataset.piece = i;
@@ -202,7 +204,7 @@ function makePiece(i, imageUrl, tileW, tileH) {
   const y = Math.floor(i / COLS) * tileH;
 
   Object.assign(cell.style, {
-    backgroundImage: `url(${imageUrl})`,
+    backgroundImage: `url(${imgUrl})`,
     backgroundSize: `${COLS * tileW}px ${ROWS * tileH}px`,
     backgroundPosition: `-${x}px -${y}px`,
     width: '100%', height: '100%'
@@ -260,7 +262,7 @@ function checkAndLockSlot(slot) {
   }
 }
 
-function buildPuzzle(imageUrl) {
+function buildPuzzle(imgUrl) {
   puzzleGrid.innerHTML = '';
 
   const slots = [];
@@ -275,7 +277,7 @@ function buildPuzzle(imageUrl) {
   const tileH = slotRect.height;
 
   const pieces = [];
-  for (let i = 0; i < ROWS * COLS; i++) pieces.push(makePiece(i, imageUrl, tileW, tileH));
+  for (let i = 0; i < ROWS * COLS; i++) pieces.push(makePiece(i, imgUrl, tileW, tileH));
   shuffle(pieces);
 
   for (let i = 0; i < slots.length; i++) {
@@ -286,7 +288,7 @@ function buildPuzzle(imageUrl) {
 
 function startTimer() {
   clearInterval(timerHandle);
-  timeLeft = 45;
+  timeLeft = 30;                     // ⏱ now 30 seconds
   timeLeftEl.textContent = timeLeft;
   timerHandle = setInterval(() => {
     timeLeftEl.textContent = --timeLeft;
@@ -304,7 +306,7 @@ if (restartBtn) {
   restartBtn.addEventListener('click', () => {
     clearInterval(timerHandle);
     puzzleGrid.innerHTML = '';
-    timeLeftEl.textContent = '45';
+    timeLeftEl.textContent = '30';   // ⏱ reset shows 30
     startBtn.disabled = false;
     mintBtn.disabled = true;
     restartBtn.disabled = true;
@@ -319,11 +321,13 @@ if (startBtn) {
 
     if (!imageList.length) await loadImageList();
 
-    const imageUrl = pickRandomImage();
-    await preloadImage(imageUrl);
-    previewImg.src = imageUrl;
-    buildPuzzle(imageUrl);
+    const url = pickRandomImage();
+    await preloadImage(url);
+    previewImg.src = url;
+    buildPuzzle(url);
     startTimer();
+
+    restartBtn.disabled = false;     // ✅ allow restart immediately
   });
 }
 
