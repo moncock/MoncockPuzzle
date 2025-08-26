@@ -108,8 +108,8 @@ const mintBtn                 = document.getElementById('mintBtn');
 const restartBtn              = document.getElementById('restartBtn');
 const timeLeftEl              = document.getElementById('timeLeft');
 const puzzleGrid              = document.getElementById('puzzleGrid');
-const previewImg              = document.getElementById('previewImg');
-const referenceImg            = document.getElementById('referenceImg');
+const previewImg              = document.getElementById('previewImg');   // hidden in HTML
+const referenceImg            = document.getElementById('referenceImg'); // visible left
 
 // ── STATE ─────────────────────────────────────────────
 let provider, signer, contract;
@@ -363,7 +363,7 @@ async function mintSnapshot(){
     const snapshot = canvas.toDataURL('image/png');
 
     // 👇 Show what will be minted IMMEDIATELY (optimistic UI)
-    previewImg.src = snapshot;
+    if (previewImg) previewImg.src = snapshot;
 
     // 2) Warm backend (non-blocking best-effort)
     setMintStatus('⚙️ Warming up backend…');
@@ -386,7 +386,6 @@ async function mintSnapshot(){
         image: snapshot,
         name: 'Moncock Puzzle',
         description: 'Snapshot of your puzzle from Moncock Puzzle.',
-        // Local preview traits; server will upsert canonical ones too
         attributes: [
           { trait_type:'Game',          value:'Puzzle' },
           { trait_type:'Completion (%)',value: completion },
@@ -394,7 +393,6 @@ async function mintSnapshot(){
           { trait_type:'Rank',          value: rank },
           { trait_type:'Tiles Correct', value: `${correct}/${total}` }
         ],
-        // 🔑 Canonical frozen score for backend merge
         score: {
           rank,
           percent: completion,
@@ -431,7 +429,7 @@ async function mintSnapshot(){
     // 6) TX broadcasted — re-enable UI immediately
     const url = explorerTxUrl(tx.hash);
     setMintStatus(`📤 Transaction sent. Waiting on-chain…\n${url}`);
-    mintBtn.disabled = false;              // let them keep playing
+    mintBtn.disabled = false;
     startBtn.disabled = false;
     restartBtn.disabled = false;
     clearInterval(timerHandle);
@@ -475,18 +473,23 @@ if(startBtn){
       const originalUrl = pickRandomImage(imageList);
 
       // Normalize to square and load for mint
-const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
-const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
-currentImageEl = normalizedImg;
+      const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
+      const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
+      currentImageEl = normalizedImg;
 
-// Set reference (left) and preview (right)
-referenceImg.src = normalizedDataUrl;   // 👈 NEW line
-previewImg.src   = normalizedDataUrl;
+      // Set reference (left visible) and preview (hidden)
+      if (referenceImg) referenceImg.src = normalizedDataUrl;
+      if (previewImg)   previewImg.src   = normalizedDataUrl;
 
-// Build puzzle from normalized image
-buildPuzzle(normalizedDataUrl);
-startTimer();
-restartBtn.disabled=false;
+      // Build puzzle from normalized image
+      buildPuzzle(normalizedDataUrl);
+      startTimer();
+      restartBtn.disabled=false;
+
+    }catch(err){
+      console.error('start error:', err);
+      alert('Failed to start game: ' + (err?.message || String(err)));
+      startBtn.disabled=false;
     }
   });
 }
@@ -506,7 +509,7 @@ if (connectWalletConnectBtn) connectWalletConnectBtn.addEventListener('click', c
     if(imageList.length){
       const url = pickRandomImage(imageList);
       const normalized = await normalizeImage(url, NORMALIZE_SIZE);
-      previewImg.src = normalized;
+      if (previewImg) previewImg.src = normalized; // keep hidden preview alive
     }
   }catch(e){
     console.error('init error:', e);
