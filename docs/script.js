@@ -109,6 +109,7 @@ const restartBtn              = document.getElementById('restartBtn');
 const timeLeftEl              = document.getElementById('timeLeft');
 const puzzleGrid              = document.getElementById('puzzleGrid');
 const previewImg              = document.getElementById('previewImg');
+const referenceImg            = document.getElementById('referenceImg');
 
 // ── STATE ─────────────────────────────────────────────
 let provider, signer, contract;
