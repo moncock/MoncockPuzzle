@@ -1,5 +1,6 @@
- // ✅ MONCOCK PUZZLE — script.js
+// ✅ MONCOCK PUZZLE — script.js
 // wallet-first + safe image loader + square normalize + canvas render mint
+// ranks (Diamond/Gold/Silver/Bronze) + instant feedback mint flow
 
 // ── SETTINGS ──────────────────────────────────────────
 const NORMALIZE_SIZE = 600;           // square size (px) used to normalize art
@@ -7,6 +8,14 @@ const CONTRACT_ADDRESS = '0x259C1Da2586295881C18B733Cb738fe1151bD2e5';
 const CHAIN_ID_HEX = '0x279F';        // 10143 (Monad Testnet)
 const API_BASE = '';                  // Netlify redirect /api/* → functions
 const ROWS = 3, COLS = 3;
+
+// ---- Rank rules (tweak later if you want) ----
+const RANK_RULES = {
+  diamondTimeSec: 10,  // ✅ must be 100% and ≤10s for DIAMOND
+  goldTimeSec: 20,     // 100% but slower, or very high completion fast
+  goldMinPct: 90,      // ≥90% within goldTimeSec → GOLD
+  silverMinPct: 50     // 50–89% → SILVER
+};
 
 // ── CONTRACT ABI ──────────────────────────────────────
 const ABI = [
@@ -247,41 +256,27 @@ function startTimer(){
   },1000);
 }
 
-// ── CONTROLS ──────────────────────────────────────────
-if(restartBtn){
-  restartBtn.addEventListener('click',()=>{
-    clearInterval(timerHandle); puzzleGrid.innerHTML=''; timeLeftEl.textContent='30';
-    startBtn.disabled=false; mintBtn.disabled=true; restartBtn.disabled=true;
-  });
+// ── RANK HELPERS ──────────────────────────────────────
+function getCompletionPercent() {
+  const slots = Array.from(puzzleGrid.querySelectorAll('.slot'));
+  if (!slots.length) return 0;
+  let correct = 0;
+  for (const s of slots) {
+    const p = s.firstElementChild;
+    if (p && Number(s.dataset.slot) === Number(p.dataset.piece)) correct++;
+  }
+  return Math.round((correct / (ROWS * COLS)) * 100);
 }
-if(startBtn){
-  startBtn.addEventListener('click', async ()=>{
-    // Require wallet before gameplay
-    if (!signer) { alert('Please connect your wallet first.'); return; }
-
-    try{
-      startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
-
-      if(!imageList.length) imageList = await loadImageList();
-      if(!imageList.length){ alert('No puzzle images found (list.json is empty).'); startBtn.disabled=false; return; }
-      const originalUrl = pickRandomImage(imageList);
-
-      // Normalize to square and load for mint
-      const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
-      const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
-      currentImageEl = normalizedImg;
-
-      // Build puzzle from normalized image and show preview
-      previewImg.src = normalizedDataUrl;
-      buildPuzzle(normalizedDataUrl);
-      startTimer();
-      restartBtn.disabled=false;
-    }catch(err){
-      console.error('start error:', err);
-      alert('Failed to start game: ' + (err?.message || String(err)));
-      startBtn.disabled=false;
-    }
-  });
+function getRankFromPercent(pct, elapsedSeconds) {
+  // DIAMOND → perfect AND within 10s (your requirement)
+  if (pct === 100 && elapsedSeconds <= RANK_RULES.diamondTimeSec) return 'Diamond';
+  // GOLD → perfect but slower (≤20s), or nearly perfect fast
+  if ((pct === 100 && elapsedSeconds <= RANK_RULES.goldTimeSec) ||
+      (pct >= RANK_RULES.goldMinPct && elapsedSeconds <= RANK_RULES.goldTimeSec)) return 'Gold';
+  // SILVER → more than half but not perfect
+  if (pct >= RANK_RULES.silverMinPct) return 'Silver';
+  // BRONZE → everything else
+  return 'Bronze';
 }
 
 // ── UTILS ─────────────────────────────────────────────
@@ -296,6 +291,9 @@ function setMintStatus(msg){ const el=document.getElementById('mintStatus'); if(
 async function fetchWithTimeout(url,opts={},ms=20000){
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),ms);
   try{ return await fetch(url,{...opts,signal:ctrl.signal}); } finally{ clearTimeout(t); }
+}
+function explorerTxUrl(txHash) {
+  return `https://testnet.monadexplorer.com/tx/${txHash}`;
 }
 
 // ── RENDER BOARD → CANVAS (no html2canvas) ───────────
@@ -347,58 +345,131 @@ function renderBoardToCanvas(){
   return canvas;
 }
 
-// ── MINT (server builds metadata; use uriGateway) ────
+// ── MINT (instant feedback; confirm in background) ───
 async function mintSnapshot(){
   try{
     if(!puzzleGrid.children.length) throw new Error('No puzzle to mint');
     if(!currentImageEl) throw new Error('No image loaded for this round');
 
-    mintBtn.disabled=true; setMintStatus('⚙️ Warming up backend…');
-    try{ await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`,{method:'HEAD',cache:'no-store'},4000); }catch{}
-
+    // 1) Render the board → snapshot (fast)
     setMintStatus('🧩 Rendering board…');
     const canvas   = renderBoardToCanvas();
     const snapshot = canvas.toDataURL('image/png');
 
+    // 👇 Show what will be minted IMMEDIATELY (optimistic UI)
+    previewImg.src = snapshot;
+
+    // 2) Warm backend (non-blocking best-effort)
+    setMintStatus('⚙️ Warming up backend…');
+    try { await fetchWithTimeout(`${API_BASE}/api/upload?warm=1`, { method:'HEAD', cache:'no-store' }, 4000); } catch {}
+
+    // 3) Compute completion + rank for metadata
+    const completion = getCompletionPercent();
+    const elapsed    = 30 - timeLeft; // timer starts at 30s
+    const rank       = getRankFromPercent(completion, elapsed);
+
+    // 4) Upload image + metadata (blocking, but quick)
     setMintStatus('☁️ Uploading to IPFS…');
     const res = await fetchWithTimeout(`${API_BASE}/api/upload`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ image: snapshot }) // backend constructs metadata
-    },25000);
+      body:JSON.stringify({
+        image: snapshot,
+        name: 'Moncock Puzzle',
+        description: 'Snapshot of your puzzle from Moncock Puzzle.',
+        attributes: [
+          { trait_type:'Game',       value:'Puzzle' },
+          { trait_type:'Timer',      value:`${Math.max(0,timeLeft)}s left` },
+          { trait_type:'Elapsed',    value:`${elapsed}s` },
+          { trait_type:'Completion', value:`${completion}%` },
+          { trait_type:'Rank',       value:rank }
+        ]
+      })
+    }, 25000);
 
     if(!res.ok){
       const text = await res.text().catch(()=> '');
       throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
     }
     const upload = await res.json();
-    console.log('[upload]', upload);
-
     const metaGateway = upload.uriGateway;
     if(!metaGateway || !/^https?:\/\//.test(metaGateway)){
+      console.error('Upload response:', upload);
       throw new Error('Invalid upload response: missing uriGateway');
     }
 
+    // pre-warm gateways (don’t block UX)
     (async()=>{ try{ await warm(metaGateway,2); }catch{} })();
     (async()=>{ try{ if(upload.imageGateway) await warm(upload.imageGateway,1); }catch{} })();
 
-    setMintStatus('⛓️ Sending transaction…');
+    // 5) Send TX (block UI only until broadcast, not confirmation)
+    setMintStatus('⛓️ Sending transaction… open your wallet');
+    mintBtn.disabled = true;  // prevent double-click
     const to = await signer.getAddress();
     const tx = await contract.mintNFT(to, metaGateway);
 
-    setMintStatus('⏱️ Waiting 1 confirmation…');
-    await provider.waitForTransaction(tx.hash, 1);
-
-    setMintStatus('🎉 Minted!');
+    // 6) TX broadcasted — re-enable UI immediately
+    const url = explorerTxUrl(tx.hash);
+    setMintStatus(`📤 Transaction sent. Waiting on-chain…\n${url}`);
+    mintBtn.disabled = false;              // let them keep playing
+    startBtn.disabled = false;
+    restartBtn.disabled = false;
     clearInterval(timerHandle);
-    startBtn.disabled=false; restartBtn.disabled=false;
-    alert('🎉 Minted successfully!');
+
+    // 7) Confirm in the background (no blocking)
+    provider.waitForTransaction(tx.hash, 1)
+      .then(() => {
+        setMintStatus(`✅ Confirmed on-chain!\n${url}`);
+        alert('🎉 Mint confirmed!');
+      })
+      .catch(err => {
+        console.error('waitForTransaction error:', err);
+        setMintStatus(`⚠️ Could not confirm yet. You can check here:\n${url}`);
+      });
+
   }catch(err){
     console.error(err);
+    setMintStatus('❌ Mint failed');
     alert('Mint failed: ' + (err?.message || err));
-  }finally{
-    mintBtn.disabled=false;
+    mintBtn.disabled = false;
   }
+}
+
+// ── CONTROLS ──────────────────────────────────────────
+if(restartBtn){
+  restartBtn.addEventListener('click',()=>{
+    clearInterval(timerHandle); puzzleGrid.innerHTML=''; timeLeftEl.textContent='30';
+    startBtn.disabled=false; mintBtn.disabled=true; restartBtn.disabled=true;
+  });
+}
+if(startBtn){
+  startBtn.addEventListener('click', async ()=>{
+    // Require wallet before gameplay
+    if (!signer) { alert('Please connect your wallet first.'); return; }
+
+    try{
+      startBtn.disabled=true; mintBtn.disabled=false; restartBtn.disabled=true;
+
+      if(!imageList.length) imageList = await loadImageList();
+      if(!imageList.length){ alert('No puzzle images found (list.json is empty).'); startBtn.disabled=false; return; }
+      const originalUrl = pickRandomImage(imageList);
+
+      // Normalize to square and load for mint
+      const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
+      const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
+      currentImageEl = normalizedImg;
+
+      // Build puzzle from normalized image and show preview
+      previewImg.src = normalizedDataUrl;
+      buildPuzzle(normalizedDataUrl);
+      startTimer();
+      restartBtn.disabled=false;
+    }catch(err){
+      console.error('start error:', err);
+      alert('Failed to start game: ' + (err?.message || String(err)));
+      startBtn.disabled=false;
+    }
+  });
 }
 
 // ── WIRE UP (wallet-first) ────────────────────────────
