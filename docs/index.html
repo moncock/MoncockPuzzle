@@ -71,7 +71,10 @@
       document.head.appendChild(s);
     })();
   </script>
-
+  
+  <!-- 👇 Load mobile patch after script.js -->
+  <script src="mobile.js?v=<?php echo time(); ?>"></script>
+  
   <!-- Safety net: ensure the Connect button always works -->
   <script>
     (function() {
