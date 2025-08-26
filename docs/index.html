@@ -35,24 +35,18 @@
 
     <div id="mintStatus" style="margin-top:.5rem;font-size:.9rem;color:#4c51bf;"></div>
 
-    <!-- ⏱ default text updated to 30 -->
     <div class="timer">⏲️ Time Left: <span id="timeLeft">30</span>s</div>
 
+    <!-- Two-column layout: LEFT reference, RIGHT puzzle -->
     <div class="game-row">
-      <!-- ✅ LEFT: permanent reference (unchanging) -->
+      <!-- LEFT: permanent reference (never changes) -->
       <div class="preview">
         <h3>Reference Picture</h3>
         <img id="referenceImg" src="preview.png" alt="Puzzle Reference" />
       </div>
 
-      <!-- ✅ CENTER: PUZZLE GRID -->
+      <!-- RIGHT: puzzle grid -->
       <div id="puzzleGrid" class="grid"></div>
-
-      <!-- ✅ RIGHT: what will actually mint (snapshot) -->
-      <div class="preview">
-        <h3>Mint Snapshot</h3>
-        <img id="previewImg" alt="Mint Snapshot" />
-      </div>
     </div>
   </div>
 
@@ -71,12 +65,9 @@
   <!-- 👇 Automatic cache-busting for script.js -->
   <script>
     (function () {
-      // If you ever set window.__BUILD_ID__ (e.g., in Netlify), it’ll use that;
-      // otherwise it falls back to Date.now() to force a fresh download.
       var version = (window.__BUILD_ID__ || Date.now());
       var s = document.createElement('script');
       s.src = 'script.js?v=' + encodeURIComponent(version);
-      // No defer here; our “safety net” below patiently waits for connectInjected anyway.
       document.head.appendChild(s);
     })();
   </script>
@@ -108,5 +99,8 @@
       }, 250);
     })();
   </script>
+
+  <!-- Hidden snapshot target so existing JS keeps working without changing layout -->
+  <img id="previewImg" alt="" aria-hidden="true" style="display:none;width:0;height:0;overflow:hidden;" />
 </body>
 </html>
