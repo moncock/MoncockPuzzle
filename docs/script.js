@@ -474,19 +474,18 @@ if(startBtn){
       const originalUrl = pickRandomImage(imageList);
 
       // Normalize to square and load for mint
-      const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
-      const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
-      currentImageEl = normalizedImg;
+const normalizedDataUrl = await normalizeImage(originalUrl, NORMALIZE_SIZE);
+const normalizedImg     = await loadHTMLImage(normalizedDataUrl);
+currentImageEl = normalizedImg;
 
-      // Build puzzle from normalized image and show preview
-      previewImg.src = normalizedDataUrl;
-      buildPuzzle(normalizedDataUrl);
-      startTimer();
-      restartBtn.disabled=false;
-    }catch(err){
-      console.error('start error:', err);
-      alert('Failed to start game: ' + (err?.message || String(err)));
-      startBtn.disabled=false;
+// Set reference (left) and preview (right)
+referenceImg.src = normalizedDataUrl;   // 👈 NEW line
+previewImg.src   = normalizedDataUrl;
+
+// Build puzzle from normalized image
+buildPuzzle(normalizedDataUrl);
+startTimer();
+restartBtn.disabled=false;
     }
   });
 }
