@@ -39,14 +39,20 @@
     <div class="timer">⏲️ Time Left: <span id="timeLeft">30</span>s</div>
 
     <div class="game-row">
-      <!-- ✅ PREVIEW stays a plain <img> (not a grid) -->
+      <!-- ✅ LEFT: permanent reference (unchanging) -->
       <div class="preview">
         <h3>Reference Picture</h3>
-        <img id="previewImg" src="preview.png" alt="Puzzle Reference" />
+        <img id="referenceImg" src="preview.png" alt="Puzzle Reference" />
       </div>
 
-      <!-- ✅ PUZZLE GRID -->
+      <!-- ✅ CENTER: PUZZLE GRID -->
       <div id="puzzleGrid" class="grid"></div>
+
+      <!-- ✅ RIGHT: what will actually mint (snapshot) -->
+      <div class="preview">
+        <h3>Mint Snapshot</h3>
+        <img id="previewImg" alt="Mint Snapshot" />
+      </div>
     </div>
   </div>
 
